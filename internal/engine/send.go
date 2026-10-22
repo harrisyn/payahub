@@ -2,37 +2,218 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"maps"
+	"slices"
 
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/connector"
 )
 
-// Send delivers a claim to the payer by the plan. It is safe to call again
-// after a failure: callers reconcile with FindClaim first, and the incremental
-// path reuses the payer claim number and relies on idempotent line adds.
-func Send(ctx context.Context, conn connector.Connector, c *claim.Claim, plan Plan) (connector.Receipt, error) {
+// Progress is what the payer holds of a claim sent line by line. Send
+// records it after every step, so a retry after a crash or a timeout resumes
+// where the last run stopped, and a claim corrected after a rejection is
+// brought in line with the payer's copy (changed lines updated, removed ones
+// deleted) instead of being opened a second time.
+type Progress struct {
+	PayerClaimNumber string              `json:"payer_claim_number,omitempty"`
+	Lines            map[string]SentLine `json:"lines,omitempty"`     // by SendLine.Key
+	Diagnoses        map[string]string   `json:"diagnoses,omitempty"` // ICD-10 code -> payer ref
+}
+
+type SentLine struct {
+	Ref      string `json:"ref"`
+	Code     string `json:"code"`
+	Quantity int64  `json:"quantity"`
+	Amount   int64  `json:"amount"`
+}
+
+func (s SentLine) matches(l connector.SendLine) bool {
+	return s.Code == l.Code && s.Quantity == l.Quantity && s.Amount == l.Amount
+}
+
+// Journal stores Progress durably. It is called after each payer step.
+type Journal func(context.Context, *Progress) error
+
+// Send delivers a claim to the payer by the plan.
+//
+// The whole-claim path is one call; callers reconcile it with FindClaim
+// before a resend. The incremental path records each step in p through
+// journal, and on a resumed send first reads the payer's copy (FetchClaim) to
+// adopt any line whose add reached the payer but whose reply was lost, and to
+// notice a claim the payer already has as submitted.
+func Send(ctx context.Context, conn connector.Connector, s *connector.Submission, plan Plan, p *Progress, journal Journal) (connector.Receipt, error) {
 	if plan.WholeClaim() {
-		return conn.SubmitWholeClaim(ctx, c)
+		return conn.SubmitWholeClaim(ctx, s)
 	}
-	number := c.PayerClaimNumber
-	if number == "" {
-		var err error
-		if number, err = conn.OpenClaim(ctx, c); err != nil {
+	if p.Lines == nil {
+		p.Lines = map[string]SentLine{}
+	}
+	if p.Diagnoses == nil {
+		p.Diagnoses = map[string]string{}
+	}
+	record := func() error {
+		if err := journal(ctx, p); err != nil {
+			// The payer has the step but we could not write it down: retry,
+			// and the next run reconciles against the payer's copy.
+			return connector.Errorf(connector.Connection, "recording progress: %v", err)
+		}
+		return nil
+	}
+
+	if p.PayerClaimNumber == "" {
+		number, err := conn.OpenClaim(ctx, s)
+		if err != nil {
+			return connector.Receipt{}, err
+		}
+		p.PayerClaimNumber = number
+		if err := record(); err != nil {
+			return connector.Receipt{}, err
+		}
+	} else {
+		done, err := reconcile(ctx, conn, s, p)
+		if err != nil {
+			return connector.Receipt{PayerClaimNumber: p.PayerClaimNumber}, err
+		}
+		if done != nil {
+			return *done, nil
+		}
+		if err := record(); err != nil {
 			return connector.Receipt{}, err
 		}
 	}
-	for _, l := range c.Lines {
-		if _, err := conn.AddLine(ctx, number, l); err != nil {
-			return connector.Receipt{PayerClaimNumber: number}, err
+	number := p.PayerClaimNumber
+	fail := func(err error) (connector.Receipt, error) {
+		return connector.Receipt{PayerClaimNumber: number}, err
+	}
+
+	want := make(map[string]bool, len(s.Lines))
+	for _, l := range s.Lines {
+		want[l.Key] = true
+	}
+	for _, key := range sortedKeys(p.Lines) {
+		if want[key] {
+			continue
+		}
+		if err := conn.DeleteLine(ctx, s, number, p.Lines[key].Ref); err != nil && !isCode(err, connector.LineNotFound) {
+			return fail(err)
+		}
+		delete(p.Lines, key)
+		if err := record(); err != nil {
+			return fail(err)
 		}
 	}
-	for _, d := range c.Diagnoses {
-		if err := conn.AddDiagnosis(ctx, number, d); err != nil {
-			return connector.Receipt{PayerClaimNumber: number}, err
+	for _, l := range s.Lines {
+		sent, ok := p.Lines[l.Key]
+		switch {
+		case ok && sent.matches(l):
+			continue
+		case ok:
+			if err := conn.UpdateLine(ctx, s, number, sent.Ref, l); err != nil {
+				return fail(err)
+			}
+		default:
+			ref, err := conn.AddLine(ctx, s, number, l)
+			if err != nil {
+				return fail(err)
+			}
+			sent.Ref = ref
+		}
+		p.Lines[l.Key] = SentLine{Ref: sent.Ref, Code: l.Code, Quantity: l.Quantity, Amount: l.Amount}
+		if err := record(); err != nil {
+			return fail(err)
 		}
 	}
-	return conn.FinalizeClaim(ctx, number, c)
+
+	wantDx := make(map[string]bool, len(s.Diagnoses))
+	for _, d := range s.Diagnoses {
+		wantDx[d.Key()] = true
+	}
+	for _, key := range sortedKeys(p.Diagnoses) {
+		if wantDx[key] {
+			continue
+		}
+		if err := conn.DeleteDiagnosis(ctx, s, number, p.Diagnoses[key]); err != nil {
+			return fail(err)
+		}
+		delete(p.Diagnoses, key)
+		if err := record(); err != nil {
+			return fail(err)
+		}
+	}
+	for _, d := range s.Diagnoses {
+		if _, ok := p.Diagnoses[d.Key()]; ok {
+			continue
+		}
+		ref, err := conn.AddDiagnosis(ctx, s, number, d)
+		if err != nil {
+			return fail(err)
+		}
+		p.Diagnoses[d.Key()] = ref
+		if err := record(); err != nil {
+			return fail(err)
+		}
+	}
+
+	r, err := conn.FinalizeClaim(ctx, s, number)
+	if r.PayerClaimNumber == "" {
+		r.PayerClaimNumber = number
+	}
+	return r, err
 }
+
+// reconcile compares a resumed send's progress with the payer's copy. It
+// returns a receipt when the payer already has the claim as submitted.
+func reconcile(ctx context.Context, conn connector.Connector, s *connector.Submission, p *Progress) (*connector.Receipt, error) {
+	pc, err := conn.FetchClaim(ctx, p.PayerClaimNumber)
+	if isCode(err, connector.NotSupported) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch pc.Status {
+	case connector.PayerSubmitted, connector.PayerApproved, connector.PayerPaid, connector.PayerQueried:
+		return &connector.Receipt{PayerClaimNumber: p.PayerClaimNumber, Acknowledged: true}, nil
+	}
+	// Payer lines we know about are spoken for; any other line with the code
+	// of a line we have not recorded is the add whose reply was lost.
+	taken := map[string]bool{}
+	for _, sent := range p.Lines {
+		taken[sent.Ref] = true
+	}
+	for _, l := range s.Lines {
+		if _, ok := p.Lines[l.Key]; ok {
+			continue
+		}
+		for _, pl := range pc.Lines {
+			if taken[pl.Ref] || pl.Code != l.Code {
+				continue
+			}
+			taken[pl.Ref] = true
+			p.Lines[l.Key] = SentLine{Ref: pl.Ref, Code: pl.Code, Quantity: pl.Quantity, Amount: pl.Amount}
+			break
+		}
+	}
+	// A recorded line the payer no longer has must be added again.
+	have := map[string]bool{}
+	for _, pl := range pc.Lines {
+		have[pl.Ref] = true
+	}
+	for key, sent := range p.Lines {
+		if !have[sent.Ref] {
+			delete(p.Lines, key)
+		}
+	}
+	return nil, nil
+}
+
+func isCode(err error, code connector.ErrorCode) bool {
+	var ce *connector.Error
+	return err != nil && errors.As(err, &ce) && ce.Code == code
+}
+
+func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
 
 // Outcome is what a send attempt means for the claim.
 type Outcome struct {

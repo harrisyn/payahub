@@ -38,9 +38,13 @@ type Error struct {
 	UserMessage string
 	// PayerMessage is the payer's own words, kept for the AI classifier and audit.
 	PayerMessage string
+	// Cause is the transport-level error behind this one, if any.
+	Cause error
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.Message) }
+
+func (e *Error) Unwrap() error { return e.Cause }
 
 // Retryable errors are transport failures: the payer may or may not have
 // received the request, so the worker reconciles before resending.

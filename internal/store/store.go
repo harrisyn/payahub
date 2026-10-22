@@ -325,3 +325,21 @@ func PayerOverrides(ctx context.Context, q Querier, orgID, payerID, env string) 
 	}
 	return raw, err
 }
+
+// LoadProgress reads a claim's incremental-send progress; nil when none.
+func LoadProgress(ctx context.Context, q Querier, claimID string) ([]byte, error) {
+	var raw []byte
+	err := q.QueryRow(ctx, `SELECT submission_progress FROM claims WHERE id = $1`, claimID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return raw, err
+}
+
+// SaveProgress records incremental-send progress. It runs outside the claim
+// lock on purpose: the job that owns the claim is its only writer, and each
+// payer step must be written down the moment it succeeds.
+func SaveProgress(ctx context.Context, q Querier, claimID string, progress []byte) error {
+	_, err := q.Exec(ctx, `UPDATE claims SET submission_progress = $2 WHERE id = $1`, claimID, progress)
+	return err
+}

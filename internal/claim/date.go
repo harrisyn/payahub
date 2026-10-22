@@ -35,3 +35,6 @@ func (d *Date) UnmarshalJSON(b []byte) error {
 	d.Time = t
 	return nil
 }
+
+// String is the date as "YYYY-MM-DD", the form payers' APIs take.
+func (d Date) String() string { return d.Format(dateLayout) }

@@ -18,6 +18,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -39,8 +41,8 @@ var manifest = connector.Manifest{
 	Channel: connector.ChannelAPI,
 	Verbs: []connector.Verb{
 		connector.VerifyMember, connector.SubmitWholeClaim, connector.OpenClaim, connector.AddLine,
-		connector.UpdateLine, connector.DeleteLine, connector.AddDiagnosis, connector.FinalizeClaim,
-		connector.WithdrawClaim, connector.FindClaim,
+		connector.UpdateLine, connector.DeleteLine, connector.AddDiagnosis, connector.DeleteDiagnosis,
+		connector.FinalizeClaim, connector.FindClaim, connector.FetchClaim,
 	},
 	Submission: connector.DefaultSubmissionConfig(),
 	Notes:      "Simulated payer. Never reaches a real insurer.",
@@ -57,7 +59,8 @@ var payer = struct {
 
 type record struct {
 	status    string
-	lines     map[string]string
+	lines     map[string]connector.PayerLine // by payer ref
+	seq       int
 	diagnoses []string
 }
 
@@ -140,88 +143,158 @@ func send(c *claim.Claim, accept func() connector.Receipt) (connector.Receipt, e
 	return accept(), nil
 }
 
-func (Sandbox) SubmitWholeClaim(_ context.Context, c *claim.Claim) (connector.Receipt, error) {
+func (Sandbox) SubmitWholeClaim(_ context.Context, s *connector.Submission) (connector.Receipt, error) {
+	c := s.Claim
 	return send(c, func() connector.Receipt {
 		number := ClaimNumber(c.ID)
-		refs := make(map[string]string, len(c.Lines))
-		for i, l := range c.Lines {
-			refs[l.ID] = fmt.Sprintf("%s-%d", number, i+1)
+		r := &record{status: "acknowledged", lines: map[string]connector.PayerLine{}}
+		refs := make(map[string]string, len(s.Lines))
+		for i, l := range s.Lines {
+			ref := fmt.Sprintf("%s-%d", number, i+1)
+			r.lines[ref] = connector.PayerLine{Ref: ref, Code: l.Code, Quantity: l.Quantity, Amount: l.Amount}
+			for _, id := range l.LineIDs {
+				refs[id] = ref
+			}
 		}
-		payer.claims[number] = &record{status: "acknowledged", lines: refs}
+		payer.claims[number] = r
 		return connector.Receipt{PayerClaimNumber: number, Acknowledged: true, LineReferences: refs}
 	})
 }
 
-func (Sandbox) OpenClaim(_ context.Context, c *claim.Claim) (string, error) {
+func (Sandbox) OpenClaim(_ context.Context, s *connector.Submission) (string, error) {
 	payer.Lock()
 	defer payer.Unlock()
-	number := ClaimNumber(c.ID)
+	number := ClaimNumber(s.Claim.ID)
 	if _, ok := payer.claims[number]; !ok {
-		payer.claims[number] = &record{status: "open", lines: map[string]string{}}
+		payer.claims[number] = &record{status: "open", lines: map[string]connector.PayerLine{}}
 	}
 	return number, nil
 }
 
 func openRecord(number string) (*record, error) {
 	r, ok := payer.claims[number]
-	if !ok {
+	if !ok || r.status != "open" {
 		return nil, connector.Errorf(connector.ClaimClosed, "no open claim %s", number)
 	}
 	return r, nil
 }
 
-func (Sandbox) AddLine(_ context.Context, number string, l claim.Line) (string, error) {
+func (Sandbox) AddLine(_ context.Context, _ *connector.Submission, number string, l connector.SendLine) (string, error) {
 	payer.Lock()
 	defer payer.Unlock()
 	r, err := openRecord(number)
 	if err != nil {
 		return "", err
 	}
-	if ref, ok := r.lines[l.ID]; ok {
-		// Idempotent, like a payer that answers "already added" with the existing line.
-		return ref, nil
-	}
-	ref := fmt.Sprintf("%s-%d", number, len(r.lines)+1)
-	r.lines[l.ID] = ref
+	r.seq++
+	ref := fmt.Sprintf("%s-%d", number, r.seq)
+	r.lines[ref] = connector.PayerLine{Ref: ref, Code: l.Code, Quantity: l.Quantity, Amount: l.Amount}
 	return ref, nil
 }
 
-func (Sandbox) AddDiagnosis(_ context.Context, number string, d claim.Diagnosis) error {
+func (Sandbox) UpdateLine(_ context.Context, _ *connector.Submission, number, ref string, l connector.SendLine) error {
 	payer.Lock()
 	defer payer.Unlock()
 	r, err := openRecord(number)
 	if err != nil {
 		return err
 	}
-	r.diagnoses = append(r.diagnoses, d.Code.Value)
+	if _, ok := r.lines[ref]; !ok {
+		return connector.Errorf(connector.LineNotFound, "no line %s", ref)
+	}
+	r.lines[ref] = connector.PayerLine{Ref: ref, Code: l.Code, Quantity: l.Quantity, Amount: l.Amount}
 	return nil
 }
 
-func (Sandbox) FinalizeClaim(_ context.Context, number string, c *claim.Claim) (connector.Receipt, error) {
-	return send(c, func() connector.Receipt {
+func (Sandbox) DeleteLine(_ context.Context, _ *connector.Submission, number, ref string) error {
+	payer.Lock()
+	defer payer.Unlock()
+	r, err := openRecord(number)
+	if err != nil {
+		return err
+	}
+	if _, ok := r.lines[ref]; !ok {
+		return connector.Errorf(connector.LineNotFound, "no line %s", ref)
+	}
+	delete(r.lines, ref)
+	return nil
+}
+
+func (Sandbox) AddDiagnosis(_ context.Context, _ *connector.Submission, number string, d connector.SendDiagnosis) (string, error) {
+	payer.Lock()
+	defer payer.Unlock()
+	r, err := openRecord(number)
+	if err != nil {
+		return "", err
+	}
+	r.diagnoses = append(r.diagnoses, d.ICD)
+	return d.ICD, nil
+}
+
+func (Sandbox) DeleteDiagnosis(_ context.Context, _ *connector.Submission, number, ref string) error {
+	payer.Lock()
+	defer payer.Unlock()
+	r, err := openRecord(number)
+	if err != nil {
+		return err
+	}
+	r.diagnoses = slices.DeleteFunc(r.diagnoses, func(d string) bool { return d == ref })
+	return nil
+}
+
+func (Sandbox) FinalizeClaim(_ context.Context, s *connector.Submission, number string) (connector.Receipt, error) {
+	return send(s.Claim, func() connector.Receipt {
 		r := payer.claims[number]
 		if r == nil {
-			r = &record{lines: map[string]string{}}
+			r = &record{lines: map[string]connector.PayerLine{}}
 			payer.claims[number] = r
 		}
 		r.status = "acknowledged"
-		refs := make(map[string]string, len(r.lines))
-		for k, v := range r.lines {
-			refs[k] = v
-		}
-		return connector.Receipt{PayerClaimNumber: number, Acknowledged: true, LineReferences: refs}
+		return connector.Receipt{PayerClaimNumber: number, Acknowledged: true}
 	})
 }
 
-func (Sandbox) FindClaim(_ context.Context, c *claim.Claim) (*connector.Receipt, error) {
+func (Sandbox) FindClaim(_ context.Context, s *connector.Submission) (*connector.Receipt, error) {
 	payer.Lock()
 	defer payer.Unlock()
-	number := ClaimNumber(c.ID)
+	number := ClaimNumber(s.Claim.ID)
 	r, ok := payer.claims[number]
 	if !ok || r.status != "acknowledged" {
 		return nil, nil
 	}
-	return &connector.Receipt{PayerClaimNumber: number, Acknowledged: true, LineReferences: r.lines}, nil
+	return &connector.Receipt{PayerClaimNumber: number, Acknowledged: true}, nil
+}
+
+func (Sandbox) FetchClaim(_ context.Context, number string) (*connector.PayerClaim, error) {
+	payer.Lock()
+	defer payer.Unlock()
+	r, ok := payer.claims[number]
+	if !ok {
+		return nil, connector.Errorf(connector.ClaimClosed, "no claim %s", number)
+	}
+	pc := &connector.PayerClaim{Number: number, Status: connector.PayerOpen}
+	if r.status == "acknowledged" {
+		pc.Status = connector.PayerSubmitted
+	}
+	for _, ref := range slices.Sorted(maps.Keys(r.lines)) {
+		pc.Lines = append(pc.Lines, r.lines[ref])
+	}
+	return pc, nil
+}
+
+// PayerLines lists the lines the sandbox payer holds on a claim (for tests).
+func PayerLines(number string) []connector.PayerLine {
+	payer.Lock()
+	defer payer.Unlock()
+	r, ok := payer.claims[number]
+	if !ok {
+		return nil
+	}
+	var out []connector.PayerLine
+	for _, ref := range slices.Sorted(maps.Keys(r.lines)) {
+		out = append(out, r.lines[ref])
+	}
+	return out
 }
 
 // Sends reports how many times a claim was sent to the sandbox payer (tests use

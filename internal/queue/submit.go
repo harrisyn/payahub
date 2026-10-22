@@ -7,6 +7,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -256,8 +257,21 @@ func (w *SubmitWorker) send(ctx context.Context, c *claim.Claim, retry bool) (co
 	ctx, cancel := context.WithTimeout(ctx, payerTimeout)
 	defer cancel()
 
-	if retry {
-		found, err := conn.FindClaim(ctx, c)
+	overrides, err := store.PayerOverrides(ctx, w.Store.Pool, c.OrganizationID, c.PayerID, c.Environment)
+	if err != nil {
+		return connector.Receipt{}, err
+	}
+	// Sandbox claims are checked against the named payer's rules but sent the
+	// way the sandbox payer takes them.
+	cfg := engine.ResolveConfig(m, overrides)
+	if c.Environment == "sandbox" {
+		m = conn.Manifest()
+	}
+	plan := engine.ChoosePlan(m, cfg)
+	sub := engine.Build(c, cfg)
+
+	if plan.WholeClaim() && retry {
+		found, err := conn.FindClaim(ctx, sub)
 		if err == nil && found != nil {
 			return *found, nil
 		}
@@ -265,16 +279,24 @@ func (w *SubmitWorker) send(ctx context.Context, c *claim.Claim, retry bool) (co
 			return connector.Receipt{}, err
 		}
 	}
-	overrides, err := store.PayerOverrides(ctx, w.Store.Pool, c.OrganizationID, c.PayerID, c.Environment)
+	var progress engine.Progress
+	raw, err := store.LoadProgress(ctx, w.Store.Pool, c.ID)
 	if err != nil {
 		return connector.Receipt{}, err
 	}
-	// Sandbox claims are checked against the named payer's rules but sent the
-	// way the sandbox payer takes them.
-	if c.Environment == "sandbox" {
-		m = conn.Manifest()
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &progress); err != nil {
+			return connector.Receipt{}, fmt.Errorf("claim %s progress: %w", c.ID, err)
+		}
 	}
-	return engine.Send(ctx, conn, c, engine.ChoosePlan(m, engine.ResolveConfig(m, overrides)))
+	journal := func(ctx context.Context, p *engine.Progress) error {
+		b, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		return store.SaveProgress(ctx, w.Store.Pool, c.ID, b)
+	}
+	return engine.Send(ctx, conn, sub, plan, &progress, journal)
 }
 
 func (w *SubmitWorker) finish(ctx context.Context, job *river.Job[SubmitArgs], o engine.Outcome) error {
