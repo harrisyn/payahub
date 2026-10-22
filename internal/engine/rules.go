@@ -54,7 +54,14 @@ func Check(c *claim.Claim, cfg connector.SubmissionConfig) []Issue {
 	for i, l := range c.Lines {
 		field := fmt.Sprintf("lines[%d].mapping", i)
 		if !l.Mapping.Mapped() && cfg.UnmappedLinePolicy == "block" {
-			add("line_unmapped", SeverityError, field, fmt.Sprintf("%q has no code for this payer.", l.Description))
+			msg := fmt.Sprintf("%q has no code for this payer.", l.Description)
+			switch {
+			case l.Item != "":
+				msg = fmt.Sprintf("This payer has no code for %q (%s) yet.", l.Description, l.Item)
+			case l.Code != nil:
+				msg = fmt.Sprintf("%q: map your code %q to a standard item first.", l.Description, l.Code.Value)
+			}
+			add("line_unmapped", SeverityError, field, msg)
 		}
 		if l.Mapping != nil {
 			issues = appendEvidence(issues, l.Mapping.Evidence, field)

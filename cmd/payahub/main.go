@@ -6,7 +6,9 @@
 //	payahub dev       migrate, seed the sandbox key, then api + worker in one process
 //
 // Configuration is by environment: DATABASE_URL, PAYAHUB_ADDR (default :8080),
-// PAYAHUB_WORKERS (concurrent submissions per worker process, default 100).
+// PAYAHUB_WORKERS (concurrent submissions per worker process, default 100),
+// PAYAHUB_VAULT_KEY (base64 32-byte key that seals payer credentials; required
+// for api and worker, generated per run by dev).
 package main
 
 import (
@@ -25,6 +27,7 @@ import (
 	_ "github.com/harrisyn/payahub/internal/connector/all"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
+	"github.com/harrisyn/payahub/internal/vault"
 )
 
 const sandboxKey = "sk_sandbox_dev"
@@ -58,13 +61,23 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	defer st.Close()
 
 	workers, _ := strconv.Atoi(env("PAYAHUB_WORKERS", "100"))
-	switch cmd {
-	case "migrate":
+	if cmd == "migrate" {
 		return st.Migrate(ctx)
+	}
+	key := os.Getenv("PAYAHUB_VAULT_KEY")
+	if key == "" && cmd == "dev" {
+		key = vault.NewKey()
+		logger.Warn("PAYAHUB_VAULT_KEY not set: using a key for this run only; saved payer credentials will not open after a restart")
+	}
+	v, err := vault.New(key)
+	if err != nil {
+		return fmt.Errorf("PAYAHUB_VAULT_KEY: %w", err)
+	}
+	switch cmd {
 	case "api":
-		return serve(ctx, st, 0, logger)
+		return serve(ctx, st, v, 0, logger)
 	case "worker":
-		return work(ctx, st, workers, logger)
+		return work(ctx, st, v, workers, logger)
 	case "dev":
 		if err := st.Migrate(ctx); err != nil {
 			return err
@@ -73,13 +86,13 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 			return err
 		}
 		logger.Info("sandbox ready", "api_key", sandboxKey)
-		return serve(ctx, st, workers, logger)
+		return serve(ctx, st, v, workers, logger)
 	}
 	return fmt.Errorf("unknown command %q", cmd)
 }
 
-func work(ctx context.Context, st *store.Store, workers int, logger *slog.Logger) error {
-	rc, err := queue.NewClient(st, workers, logger)
+func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) error {
+	rc, err := queue.NewClient(st, v, workers, logger)
 	if err != nil {
 		return err
 	}
@@ -93,8 +106,8 @@ func work(ctx context.Context, st *store.Store, workers int, logger *slog.Logger
 	return rc.Stop(stopCtx)
 }
 
-func serve(ctx context.Context, st *store.Store, workers int, logger *slog.Logger) error {
-	rc, err := queue.NewClient(st, workers, logger)
+func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) error {
+	rc, err := queue.NewClient(st, v, workers, logger)
 	if err != nil {
 		return err
 	}
@@ -105,7 +118,7 @@ func serve(ctx context.Context, st *store.Store, workers int, logger *slog.Logge
 	}
 	srv := &http.Server{
 		Addr:              env("PAYAHUB_ADDR", ":8080"),
-		Handler:           (&api.Server{Store: st, Queue: rc, Logger: logger}).Handler(),
+		Handler:           (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

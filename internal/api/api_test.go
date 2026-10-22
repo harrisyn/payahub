@@ -21,6 +21,7 @@ import (
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
+	"github.com/harrisyn/payahub/internal/vault"
 )
 
 // These tests need Postgres: set PAYAHUB_TEST_DATABASE_URL (CI does).
@@ -55,14 +56,18 @@ func setup(t testing.TB) env {
 		if setupErr = st.Migrate(ctx); setupErr != nil {
 			return
 		}
-		rc, err := queue.NewClient(st, 200, logger)
+		v, err := vault.New(vault.NewKey())
+		if setupErr = err; err != nil {
+			return
+		}
+		rc, err := queue.NewClient(st, v, 200, logger)
 		if setupErr = err; err != nil {
 			return
 		}
 		if setupErr = rc.Start(ctx); setupErr != nil {
 			return
 		}
-		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Logger: logger}).Handler())
+		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler())
 	})
 	if setupErr != nil {
 		t.Fatal(setupErr)

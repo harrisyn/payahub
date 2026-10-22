@@ -108,7 +108,11 @@ type Line struct {
 	ID          string       `json:"id"`
 	Description string       `json:"description"`
 	Category    LineCategory `json:"category,omitempty"`
-	Code        *Code        `json:"code,omitempty"`
+	// Code is the line's code as sent: the organisation's own, or a standard
+	// item ({"system": "payahub", "value": "MED-0001"}).
+	Code *Code `json:"code,omitempty"`
+	// Item is the standard item the line resolved to.
+	Item        string       `json:"item,omitempty"`
 	Mapping     *CodeMapping `json:"mapping,omitempty"`
 	Quantity    int64        `json:"quantity"`
 	UnitPrice   int64        `json:"unit_price"` // minor units

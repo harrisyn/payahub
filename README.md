@@ -4,8 +4,10 @@ Send any claim, in any form, to any supported payer. One REST API for
 real-time submission, plus document, batch and web-form intake later, all
 landing in one canonical claim and one AI-assisted, rules-governed engine.
 
-Status: scaffold. The sandbox payer works end to end; real payer connectors
-are ported from Serenity in phases 0 and 1.
+Status: first drop. The landing page, sign-up and onboarding console work end
+to end against the sandbox payer. Real payer connectors (XCeli, Medserve,
+SmartClaims, RX Insurance, ClaimIQ) are listed and take credentials now; their
+send paths are ported from Serenity in phases 0 and 1.
 
 ## Run it
 
@@ -42,8 +44,45 @@ Sandbox member numbers starting `NOTFOUND`, `OTP`, `REJECT`, `FLAKY` or
 `LOSTREPLY` exercise the failure and recovery paths. The API is described in
 [`openapi/payahub.v1.yaml`](openapi/payahub.v1.yaml).
 
+### The web app
+
+```bash
+cd apps/web && pnpm install
+PAYAHUB_API_URL=http://localhost:8080 pnpm dev     # http://localhost:3000
+```
+
+The landing page is `/`, sign-up is `/start`, the console is `/console` and the
+API reference is `/docs`. The web server talks to the API from the server side
+only; the session lives in an httpOnly cookie. Console endpoints take a session
+token, never an API key.
+
+### Configuration
+
+| Variable | What |
+| --- | --- |
+| `DATABASE_URL` | Postgres |
+| `PAYAHUB_VAULT_KEY` | Base64 32-byte key that seals insurer credentials (`openssl rand -base64 32`). Required for `api` and `worker`; `dev` makes a throwaway one if unset. Losing it means re-entering every credential. |
+| `PAYAHUB_ADDR` | Listen address, default `:8080` |
+| `PAYAHUB_WORKERS` | Concurrent submissions per worker process, default 100 |
+| `PAYAHUB_API_URL` | (web) Where the web server finds the API |
+| `NEXT_PUBLIC_SITE_URL` | (web) Canonical site URL for metadata and the sitemap |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | (web) The address the landing page shows |
+
 In production run `payahub migrate` once per deploy, then any number of
 `payahub api` and `payahub worker` processes.
+
+## Payers, platforms and standard items
+
+Payers are one shared catalogue (`internal/catalog/data/payers.json`), set up
+once for every organisation. A payer is standalone (reached directly) or sits
+behind a platform such as XCeli or Medserve; the catalogue holds its code on
+that platform. An organisation adds its account on a platform once, and it
+serves every payer the platform carries.
+
+Billable items have one standard list (`items.json`: services, labs, imaging,
+procedures, medicines, consumables). An organisation maps its own codes to it
+once; payer codes hang off the standard items (`data/codes/<payer>.json`). A
+claim line travels own code -> standard item -> the payer's code.
 
 ## How a claim is never lost
 
@@ -58,7 +97,8 @@ already has the claim before sending again; every step is in the audit trail.
 | --- | --- |
 | `cmd/payahub` | The backend binary: `api`, `worker`, `migrate`, `dev` |
 | `internal/claim` | Canonical claim and lifecycle |
-| `internal/connector` | Connector SDK, sandbox payer, payer connectors |
+| `internal/catalog` | Shared payer catalogue and standard item list (data in `data/`), suggestions, line resolution |
+| `internal/connector` | Connector SDK, sandbox payer, platform connectors |
 | `internal/engine` | Edit rules, submission strategy, send and outcome |
 | `internal/store` | Postgres, migrations, audit events |
 | `internal/queue` | Durable submission jobs (River) |

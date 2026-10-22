@@ -1,0 +1,35 @@
+[
+  {
+    "id": "sandbox",
+    "name": "Payahub Sandbox",
+    "country": "ZZ",
+    "connector": "sandbox",
+    "generated_codes": "SBX",
+    "notes": "A standalone test insurer. Every trial can send to it."
+  },
+  {
+    "id": "sandbox_mutual",
+    "name": "Sandbox Mutual",
+    "country": "ZZ",
+    "connector": "sandbox_exchange",
+    "fields": { "payer_code": "MUT" },
+    "generated_codes": "MUT",
+    "notes": "A test insurer behind Sandbox Exchange, to try a platform account."
+  },
+  {
+    "id": "sandbox_life",
+    "name": "Sandbox Life",
+    "country": "ZZ",
+    "connector": "sandbox_exchange",
+    "fields": { "payer_code": "LIF" },
+    "generated_codes": "LIF",
+    "notes": "A second insurer on Sandbox Exchange: one exchange account serves both."
+  },
+  {
+    "id": "glico",
+    "name": "GLICO Healthcare",
+    "country": "GH",
+    "connector": "xceli",
+    "notes": "Reached through XCeli (core-api-v2 xceli.py). Its XCeli API server is still to be recorded."
+  }
+]
