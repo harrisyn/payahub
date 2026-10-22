@@ -1,0 +1,229 @@
+openapi: 3.1.0
+info:
+  title: Payahub API
+  version: 0.1.0
+  description: |
+    Send any claim, in any form, to any supported payer.
+    Authenticate with `Authorization: Bearer <api key>`. Sandbox keys reach a simulated payer.
+    Money is in minor units (pesewas, cents). Every write accepts an `Idempotency-Key`.
+servers:
+  - url: http://localhost:8080
+security:
+  - apiKey: []
+paths:
+  /v1/health:
+    get:
+      security: []
+      summary: Liveness and database reachability
+      responses:
+        "200": { description: OK }
+        "503": { description: Database unreachable }
+  /v1/payers:
+    get:
+      security: []
+      summary: Supported payers, their capabilities and the credentials each needs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Payer" } }
+  /v1/claims:
+    post:
+      summary: Create a claim (validated, not yet sent)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/ClaimInput" } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Claim" } } } }
+        "200": { description: Replay of an earlier request with the same Idempotency-Key }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/validate:
+    post:
+      summary: Dry run of the edit rules and submission plan; nothing is stored or sent
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/ClaimInput" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Validation" } }
+  /v1/claims/{id}:
+    get:
+      summary: Get a claim
+      parameters: [{ $ref: "#/components/parameters/ClaimID" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Claim" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/claims/{id}/events:
+    get:
+      summary: The claim's audit timeline, oldest first
+      parameters: [{ $ref: "#/components/parameters/ClaimID" }]
+      responses:
+        "200": { description: OK }
+  /v1/claims/{id}/submit:
+    post:
+      summary: Queue the claim for delivery to its payer
+      description: |
+        Validates the claim and queues it durably in the same transaction, then answers 202.
+        The claim moves to `submitted`, then `acknowledged`, `rejected`, or back to `ready`
+        if something a person must fix stopped it. Calling it again while queued is a no-op.
+      parameters: [{ $ref: "#/components/parameters/ClaimID" }]
+      responses:
+        "202": { description: Queued }
+        "422": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    apiKey: { type: http, scheme: bearer }
+  parameters:
+    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
+    ClaimID: { name: id, in: path, required: true, schema: { type: string } }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+                  details: {}
+  schemas:
+    Code:
+      type: object
+      required: [system, value]
+      properties:
+        system: { type: string, examples: ["icd-10", "payer:claimiq", "local"] }
+        value: { type: string }
+        display: { type: string }
+    Evidence:
+      type: object
+      required: [origin]
+      properties:
+        origin: { enum: [submitted, ai_extracted, ai_mapped, rule_derived, human_confirmed] }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        model_version: { type: string }
+        prompt_version: { type: string }
+        prompt_hash: { type: string }
+        assertion: { type: string }
+        confirmed_by: { type: string }
+    CodeMapping:
+      type: object
+      required: [source]
+      properties:
+        source: { $ref: "#/components/schemas/Code" }
+        target: { $ref: "#/components/schemas/Code" }
+        evidence: { $ref: "#/components/schemas/Evidence" }
+    ClaimInput:
+      type: object
+      additionalProperties: false
+      required: [payer_id, member, provider, encounter]
+      properties:
+        payer_id: { type: string }
+        currency: { type: string, default: GHS }
+        authorization_code: { type: string }
+        member:
+          type: object
+          required: [member_number]
+          properties:
+            member_number: { type: string }
+            policy_number: { type: string }
+            first_name: { type: string }
+            last_name: { type: string }
+            birth_date: { type: string, format: date }
+            gender: { type: string }
+            phone: { type: string }
+        provider:
+          type: object
+          required: [name]
+          properties:
+            name: { type: string }
+            facility_code: { type: string }
+            practitioner_id: { type: string }
+        encounter:
+          type: object
+          required: [start_date]
+          properties:
+            type: { enum: [outpatient, inpatient], default: outpatient }
+            reference: { type: string }
+            start_date: { type: string, format: date }
+            end_date: { type: string, format: date }
+            admission_date: { type: string, format: date }
+            discharge_date: { type: string, format: date }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [description, unit_price]
+            properties:
+              id: { type: string }
+              description: { type: string }
+              category: { enum: [service, procedure, drug, consumable] }
+              code: { $ref: "#/components/schemas/Code" }
+              mapping: { $ref: "#/components/schemas/CodeMapping" }
+              quantity: { type: integer, minimum: 1, default: 1 }
+              unit_price: { type: integer, minimum: 0, description: Minor units }
+              service_date: { type: string, format: date }
+        diagnoses:
+          type: array
+          items:
+            type: object
+            required: [code]
+            properties:
+              code: { $ref: "#/components/schemas/Code" }
+              role: { enum: [primary, secondary], default: secondary }
+              mapping: { $ref: "#/components/schemas/CodeMapping" }
+    Claim:
+      allOf:
+        - $ref: "#/components/schemas/ClaimInput"
+        - type: object
+          properties:
+            id: { type: string }
+            organization_id: { type: string }
+            environment: { enum: [sandbox, live] }
+            state:
+              enum: [draft, mapped, validated, needs_review, ready, submitted, acknowledged, approved, rejected, paid, withdrawn]
+            payer_claim_number: { type: string }
+            total: { type: integer, description: Minor units }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    Validation:
+      type: object
+      properties:
+        state: { type: string }
+        submission_plan:
+          type: object
+          properties:
+            line_mode: { enum: [realtime, bulk] }
+            timing: { enum: [early, deferred] }
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              severity: { enum: [error, warning, review] }
+              field: { type: string }
+              message: { type: string }
+    Payer:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        country: { type: string }
+        channel: { enum: [api, portal, email] }
+        capabilities: { type: array, items: { type: string } }
+        member_otp_required: { type: boolean }
+        credentials: { type: array, items: { type: object } }

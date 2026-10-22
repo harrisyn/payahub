@@ -1,0 +1,4 @@
+.git
+apps/web/node_modules
+apps/web/.next
+.claude
