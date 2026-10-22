@@ -1,0 +1,25 @@
+[project]
+name = "payahub-api"
+version = "0.1.0"
+description = "Payahub public REST API (/v1)."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+    "payahub-claim-model",
+    "payahub-connectors",
+    "payahub-engine",
+]
+
+[tool.uv.sources]
+payahub-claim-model = { workspace = true }
+payahub-connectors = { workspace = true }
+payahub-engine = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/payahub_api"]
