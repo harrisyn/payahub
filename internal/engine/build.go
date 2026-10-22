@@ -44,6 +44,12 @@ func Build(c *claim.Claim, cfg connector.SubmissionConfig) *connector.Submission
 			g.Quantity += l.Quantity
 			g.Amount += l.Total()
 			g.LineIDs = append(g.LineIDs, l.ID)
+			if g.ServiceDate == nil {
+				g.ServiceDate = l.ServiceDate
+			}
+			if g.Prescription.Empty() && !l.Prescription.Empty() {
+				g.Prescription = l.Prescription
+			}
 			continue
 		}
 		description, payerName := l.Description, ""
@@ -57,6 +63,7 @@ func Build(c *claim.Claim, cfg connector.SubmissionConfig) *connector.Submission
 		s.Lines = append(s.Lines, connector.SendLine{
 			Key: key, Code: code, Mapped: mapped, Description: description, PayerName: payerName, Category: l.Category,
 			Quantity: l.Quantity, Amount: l.Total(), LineIDs: []string{l.ID},
+			ServiceDate: l.ServiceDate, Prescription: l.Prescription,
 		})
 	}
 
@@ -67,7 +74,8 @@ func Build(c *claim.Claim, cfg connector.SubmissionConfig) *connector.Submission
 			return
 		}
 		seen[icd] = true
-		sd := connector.SendDiagnosis{ICD: icd, Primary: d.Role == claim.Primary}
+		sd := connector.SendDiagnosis{ICD: icd, Primary: d.Role == claim.Primary,
+			Description: firstNonEmpty(d.Description, d.Code.Display), Confirmed: d.Status == claim.Confirmed}
 		if d.Mapping.Mapped() {
 			sd.PayerCode = d.Mapping.Target.Value
 		}
@@ -82,4 +90,13 @@ func Build(c *claim.Claim, cfg connector.SubmissionConfig) *connector.Submission
 		add(d)
 	}
 	return s
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

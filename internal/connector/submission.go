@@ -37,14 +37,20 @@ type SendLine struct {
 	Quantity  int64              `json:"quantity"`
 	Amount    int64              `json:"amount"` // line total, minor units
 	LineIDs   []string           `json:"line_ids"`
+	// ServiceDate is the first member line's, when given.
+	ServiceDate *claim.Date `json:"service_date,omitempty"`
+	// Prescription is the first member line's that has one.
+	Prescription *claim.Prescription `json:"prescription,omitempty"`
 }
 
 // SendDiagnosis is one diagnosis on the payer's claim.
 type SendDiagnosis struct {
 	ICD string `json:"icd"`
 	// PayerCode is the payer's own code for it, when the payer has one.
-	PayerCode string `json:"payer_code,omitempty"`
-	Primary   bool   `json:"primary"`
+	PayerCode   string `json:"payer_code,omitempty"`
+	Primary     bool   `json:"primary"`
+	Description string `json:"description,omitempty"`
+	Confirmed   bool   `json:"confirmed,omitempty"`
 }
 
 // Key is the diagnosis's stable identity on the payer's claim.

@@ -576,6 +576,14 @@ components:
               quantity: { type: integer, minimum: 1, default: 1 }
               unit_price: { type: integer, minimum: 0, description: Minor units }
               service_date: { type: string, format: date }
+              prescription:
+                type: object
+                description: How a drug was prescribed. Some payers refuse a medicine without it.
+                properties:
+                  dose: { type: string, example: "1 tablet" }
+                  frequency: { type: string, example: "3 times daily" }
+                  duration: { type: string, example: "5 days" }
+                  instructions: { type: string }
         diagnoses:
           type: array
           items:
@@ -584,6 +592,8 @@ components:
             properties:
               code: { $ref: "#/components/schemas/Code" }
               role: { enum: [primary, secondary], default: secondary }
+              description: { type: string, description: The diagnosis in words }
+              status: { enum: [provisional, confirmed], description: Payers that ask are told provisional unless confirmed }
               mapping: { $ref: "#/components/schemas/CodeMapping" }
     Claim:
       allOf:
