@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { signOut } from "@/app/actions";
 import { site } from "@/app/site";
 import { ConsoleNav } from "@/components/console-nav";
+import { UIProvider } from "@/components/ui";
 import { daysLeft, planName } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 
@@ -47,7 +48,9 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
           </button>
         </form>
       </header>
-      <main className="app-sheet">{children}</main>
+      <main className="app-sheet">
+        <UIProvider>{children}</UIProvider>
+      </main>
     </div>
   );
 }
