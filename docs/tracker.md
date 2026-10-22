@@ -24,6 +24,7 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 - [ ] Clinic price list: add, edit, import (CSV/XLSX) its own services and medicines with prices
 - [ ] A larger standard list for Ghana (common consultations, the NHIA medicines list, common labs and imaging)
 - [ ] Diagnoses: ICD-10 list, and payer diagnosis codes where a payer uses its own
+- [x] Claims carry prescriptions on drug lines and provisional/confirmed status on diagnoses
 
 ## 3. Connectors that really call the platforms
 
@@ -31,11 +32,13 @@ Ported from core-api-v2 `backend/app/plugins/insurance/`, keeping every payer qu
 each with contract tests against a recorded copy of the platform's API.
 
 - [x] Sandbox (direct) and Sandbox Exchange (platform)
-- [ ] XCeli
-- [ ] Medserve
-- [ ] SmartClaims
-- [ ] RX Insurance
-- [ ] ClaimIQ
+- [x] Line-by-line sending with a progress journal: resume after a crash, adopt a line whose reply was lost,
+      bring a corrected claim in line (update, delete, add) instead of opening it twice, reopen an expired claim
+- [x] XCeli (11 contract tests)
+- [x] Medserve (14: package and coverage lookup, approvals, cover exhausted, lost replies)
+- [x] SmartClaims (13: CGS rule sheet, rollback of a refused item, prescriptions, no data leaks)
+- [x] RX Insurance (8: 012/013, expired claims reopened with a new HMS number, no benefit, authorisation)
+- [x] ClaimIQ (7: whole claim plus batch of one, line by line, idempotent retries)
 - [ ] Live check of each against the real platform (blocked: needs test accounts)
 - [ ] Member check and OTP in the console and the API
 - [ ] Claim status from the payer after sending (accepted, queried, paid, rejected with reason)
