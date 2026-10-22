@@ -93,7 +93,8 @@ type Medserve struct {
 	tokenKey           string
 	client             *http.Client
 
-	member *beneficiary // looked up once per claim
+	member       *beneficiary // looked up once per claim
+	memberNumber string
 }
 
 func New(a connector.Account) (connector.Connector, error) {
@@ -421,14 +422,14 @@ func (m *Medserve) SendOTP(ctx context.Context, memberNumber string) (string, er
 // beneficiaryFor looks the claim's member up once per connector instance:
 // the batch needs the benId and every line the package id.
 func (m *Medserve) beneficiaryFor(ctx context.Context, c *claim.Claim) (beneficiary, error) {
-	if m.member != nil {
+	if m.member != nil && m.memberNumber == c.Member.MemberNumber {
 		return *m.member, nil
 	}
 	b, err := m.lookup(ctx, c.Member.MemberNumber)
 	if err != nil {
 		return b, err
 	}
-	m.member = &b
+	m.member, m.memberNumber = &b, c.Member.MemberNumber
 	return b, nil
 }
 
@@ -488,6 +489,9 @@ func (r lineRef) String() string {
 	}
 	return fmt.Sprintf("p=%s;d=%s;i=%d;c=%d;q=%d;a=%s", r.Pres, r.Disp, r.ICost, r.Cost, r.Qty, a)
 }
+
+// RefKey: a line is its prescription row.
+func (m *Medserve) RefKey(ref string) string { return parseRef(ref).Pres }
 
 func parseRef(s string) lineRef {
 	var r lineRef

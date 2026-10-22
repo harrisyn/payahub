@@ -129,7 +129,9 @@ func TestPlatformAccountsAreSealedAndChecked(t *testing.T) {
 		t.Fatalf("credentials not sealed: %v", err)
 	}
 	s, check := ses.do(t, "POST", "/v1/connector-accounts/xceli/live/check", nil)
-	if s != 200 || check["ok"] != false || !strings.Contains(check["message"].(string), "still being connected") {
+	// GLICO's XCeli API server is not in the catalogue yet, so the check
+	// says what is missing instead of calling anyone.
+	if s != 200 || check["ok"] != false || !strings.Contains(check["message"].(string), "insurer_api_url") {
 		t.Fatalf("check xceli: %d %v", s, check)
 	}
 

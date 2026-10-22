@@ -30,7 +30,7 @@ const (
 	// AwaitingPayer means the payer must act first (approve a line, say).
 	// The claim stays submitted and the queue checks again with backoff.
 	AwaitingPayer ErrorCode = "awaiting_payer"
-	Unknown               ErrorCode = "unknown"
+	Unknown       ErrorCode = "unknown"
 )
 
 // Error is what every connector returns on failure.

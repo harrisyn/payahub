@@ -28,15 +28,15 @@ type SendLine struct {
 	Key string `json:"key"`
 	// Code is the payer's code, or the organisation's own code when the payer
 	// accepts unmapped lines (Mapped false).
-	Code        string             `json:"code"`
-	Mapped      bool               `json:"mapped"`
-	Description string             `json:"description"`
+	Code        string `json:"code"`
+	Mapped      bool   `json:"mapped"`
+	Description string `json:"description"`
 	// PayerName is the payer's own name for the item, when the mapping has it.
-	PayerName string `json:"payer_name,omitempty"`
-	Category    claim.LineCategory `json:"category"`
-	Quantity    int64              `json:"quantity"`
-	Amount      int64              `json:"amount"` // line total, minor units
-	LineIDs     []string           `json:"line_ids"`
+	PayerName string             `json:"payer_name,omitempty"`
+	Category  claim.LineCategory `json:"category"`
+	Quantity  int64              `json:"quantity"`
+	Amount    int64              `json:"amount"` // line total, minor units
+	LineIDs   []string           `json:"line_ids"`
 }
 
 // SendDiagnosis is one diagnosis on the payer's claim.

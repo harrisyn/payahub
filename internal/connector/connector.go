@@ -76,6 +76,23 @@ type Connector interface {
 }
 
 // Unsupported answers every verb with NOT_SUPPORTED.
+// RefKeyer is implemented by connectors whose line refs carry more than the
+// payer's id for the line (Medserve keeps the dispensation and the cost the
+// insurer accepted beside the prescription row). RefKey gives the part that
+// identifies the line, so a ref we recorded and the ref FetchClaim reports
+// for the same line compare equal.
+type RefKeyer interface {
+	RefKey(ref string) string
+}
+
+// RefKey is the identity of a line ref for conn.
+func RefKey(conn Connector, ref string) string {
+	if k, ok := conn.(RefKeyer); ok {
+		return k.RefKey(ref)
+	}
+	return ref
+}
+
 type Unsupported struct{ Name string }
 
 func (u Unsupported) err(v Verb) error {

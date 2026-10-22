@@ -195,19 +195,20 @@ func reconcile(ctx context.Context, conn connector.Connector, s *connector.Submi
 	}
 	// Payer lines we know about are spoken for; any other line with the code
 	// of a line we have not recorded is the add whose reply was lost.
+	key := func(ref string) string { return connector.RefKey(conn, ref) }
 	taken := map[string]bool{}
 	for _, sent := range p.Lines {
-		taken[sent.Ref] = true
+		taken[key(sent.Ref)] = true
 	}
 	for _, l := range s.Lines {
 		if _, ok := p.Lines[l.Key]; ok {
 			continue
 		}
 		for _, pl := range pc.Lines {
-			if taken[pl.Ref] || pl.Code != l.Code {
+			if taken[key(pl.Ref)] || pl.Code != l.Code {
 				continue
 			}
-			taken[pl.Ref] = true
+			taken[key(pl.Ref)] = true
 			p.Lines[l.Key] = SentLine{Ref: pl.Ref, Code: pl.Code, Quantity: pl.Quantity, Amount: pl.Amount}
 			break
 		}
@@ -215,11 +216,11 @@ func reconcile(ctx context.Context, conn connector.Connector, s *connector.Submi
 	// A recorded line the payer no longer has must be added again.
 	have := map[string]bool{}
 	for _, pl := range pc.Lines {
-		have[pl.Ref] = true
+		have[key(pl.Ref)] = true
 	}
-	for key, sent := range p.Lines {
-		if !have[sent.Ref] {
-			delete(p.Lines, key)
+	for k, sent := range p.Lines {
+		if !have[key(sent.Ref)] {
+			delete(p.Lines, k)
 		}
 	}
 	return nil, nil
