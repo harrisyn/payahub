@@ -1,34 +1,41 @@
 # Payahub
 
-AI-driven multi-payer claims integration. Plan and architecture: see
-`docs/adr/` and the "Payahub: analysis and execution plan" doc.
+AI-driven multi-payer claims integration. Headless first: the REST API is the
+product; the web app configures it. Decisions: `docs/adr/`.
 
 ## Layout
 
-- `packages/claim-model` canonical Claim, lifecycle states
-- `packages/connectors` connector SDK (typed verbs, manifest, error taxonomy) and one folder per payer
-- `packages/engine` edit rules, submission strategy, submission pipeline
-- `apps/api` FastAPI public API under `/v1`
-- `apps/web` Next.js: landing page, onboarding, dashboard, docs
+- `cmd/payahub` the one backend binary: `api`, `worker`, `migrate`, `dev`
+- `internal/claim` canonical claim, lifecycle states (money in minor units)
+- `internal/connector` connector SDK (typed verbs, manifest, error taxonomy); one package per payer
+- `internal/engine` edit rules, submission strategy, send and outcome
+- `internal/store` Postgres (pgx), embedded idempotent migrations, audit events
+- `internal/queue` River jobs: transactional enqueue, submit worker with reconciliation
+- `internal/api` `/v1` on `net/http`
+- `openapi/payahub.v1.yaml` API spec (update it with any API change)
+- `apps/web` Next.js: landing page, onboarding, configuration, docs
 
 ## Commands
 
-- `uv sync --all-packages` then `uv run pytest -q`, `uv run ruff check .`, `uv run ruff format .`
-- `uv run python scripts/export_openapi.py` after any API change (CI fails if the spec is stale)
+- `go test ./...` (unit); with Postgres: `PAYAHUB_TEST_DATABASE_URL=postgres://... go test -race ./...`
+- `PAYAHUB_LOAD=20000 go test -run TestThroughput -v ./internal/api/` for a throughput check
+- `gofmt -l .` must be empty; `go vet ./...`
+- `docker compose up` or `DATABASE_URL=... go run ./cmd/payahub dev` (sandbox key `sk_sandbox_dev`)
 - `cd apps/web && pnpm install && pnpm build`
-- `uv run uvicorn payahub_api.main:app --reload` (sandbox key: `sk_sandbox_dev`)
 
 ## Rules
 
+- **Never lose a claim.** A claim change and the job it triggers commit in one transaction
+  (`river.InsertTx`). Never hold a transaction open across a payer call. Retries reconcile
+  with `FindClaim` before resending.
 - **No model output goes to a payer.** Connectors build payloads from validated fields. AI-set
   fields carry `Evidence`; below the per-use threshold a claim goes to `needs_review`.
 - **Payer knowledge is data.** New payer behaviour goes in the connector manifest
   (`SubmissionConfig`, verbs, credentials), not in engine branches.
-- **Translate payer errors once, at the connector edge**, into `ErrorCode`. Never match payer
-  text above the connector.
+- **Translate payer errors once, at the connector edge**, into `connector.ErrorCode`.
 - **Every write endpoint honours `Idempotency-Key`.**
-- **Alembic migrations must be idempotent** (same rule as core-api-v2): tolerate objects that
-  already exist on upgrade, check existence before dropping on downgrade.
+- **Migrations must be idempotent** (`IF NOT EXISTS`, existence checks before drops), as in core-api-v2.
+- Keep dependencies few: standard library first.
 - Porting a connector from serenity-health/core-api-v2 `backend/app/plugins/insurance/`: keep the
   payer quirks its comments document; drop the `Dict[str, Any]` interface.
 

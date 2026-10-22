@@ -1,8 +1,6 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
+/payahub
+*.test
+*.out
 node_modules/
 .next/
 *.tsbuildinfo

@@ -1,53 +1,69 @@
 # Payahub
 
 Send any claim, in any form, to any supported payer. One REST API for
-real-time submission, plus document, batch and web-form intake, all landing in
-one canonical claim and one AI-assisted, rules-governed engine.
+real-time submission, plus document, batch and web-form intake later, all
+landing in one canonical claim and one AI-assisted, rules-governed engine.
 
 Status: scaffold. The sandbox payer works end to end; real payer connectors
 are ported from Serenity in phases 0 and 1.
 
-## Quick start
+## Run it
 
 ```bash
-uv sync --all-packages
-uv run pytest -q
-uv run uvicorn payahub_api.main:app --reload
+docker compose up            # Postgres + API + worker on :8080
 ```
 
-Then, with the sandbox key:
+or, with your own Postgres:
 
 ```bash
-curl -s localhost:8000/v1/claims \
+DATABASE_URL=postgres://localhost:5432/payahub go run ./cmd/payahub dev
+```
+
+Then, with the sandbox key (amounts are in minor units, so 15000 = GHS 150.00):
+
+```bash
+curl -s localhost:8080/v1/claims \
   -H 'Authorization: Bearer sk_sandbox_dev' -H 'Idempotency-Key: demo-1' \
-  -H 'Content-Type: application/json' -d '{
+  -d '{
     "payer_id": "sandbox",
     "member": {"member_number": "M-1001"},
     "provider": {"name": "Ridge Clinic"},
     "encounter": {"start_date": "2026-10-20"},
-    "lines": [{"description": "Consultation", "unit_price": "150.00",
+    "lines": [{"description": "Consultation", "unit_price": 15000,
       "mapping": {"source": {"system": "local", "value": "CONS"},
                   "target": {"system": "payer:sandbox", "value": "C01"}}}],
     "diagnoses": [{"code": {"system": "icd-10", "value": "B54"}, "role": "primary"}]
   }'
-# then POST /v1/claims/{id}/submit
+curl -s -X POST localhost:8080/v1/claims/<id>/submit -H 'Authorization: Bearer sk_sandbox_dev'
+curl -s localhost:8080/v1/claims/<id>/events -H 'Authorization: Bearer sk_sandbox_dev'
 ```
 
-Sandbox member numbers starting `NOTFOUND`, `OTP` or `REJECT` exercise the
-failure paths. API docs: http://localhost:8000/v1/docs
+Sandbox member numbers starting `NOTFOUND`, `OTP`, `REJECT`, `FLAKY` or
+`LOSTREPLY` exercise the failure and recovery paths. The API is described in
+[`openapi/payahub.v1.yaml`](openapi/payahub.v1.yaml).
 
-Web app: `cd apps/web && pnpm install && pnpm dev`.
+In production run `payahub migrate` once per deploy, then any number of
+`payahub api` and `payahub worker` processes.
+
+## How a claim is never lost
+
+See [ADR 0003](docs/adr/0003-durable-queue.md). In short: the claim change and
+its queued job commit in one Postgres transaction; workers never hold a
+transaction across a payer call; a retried job asks the payer whether it
+already has the claim before sending again; every step is in the audit trail.
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `packages/claim-model` | Canonical claim and lifecycle |
-| `packages/connectors` | Connector SDK, sandbox payer, payer connectors |
-| `packages/engine` | Edit rules, submission strategy, pipeline |
-| `apps/api` | Public API (`/v1`) |
-| `apps/web` | Landing page, onboarding, dashboard, docs |
-| `openapi/` | Generated spec, source for docs and SDKs |
+| `cmd/payahub` | The backend binary: `api`, `worker`, `migrate`, `dev` |
+| `internal/claim` | Canonical claim and lifecycle |
+| `internal/connector` | Connector SDK, sandbox payer, payer connectors |
+| `internal/engine` | Edit rules, submission strategy, send and outcome |
+| `internal/store` | Postgres, migrations, audit events |
+| `internal/queue` | Durable submission jobs (River) |
+| `internal/api` | Public API (`/v1`) |
+| `apps/web` | Landing page, onboarding, configuration, docs |
 | `docs/adr/` | Architecture decisions |
 | `.claude/skills/` | Design skills: taste-skill, impeccable, frontend-design |
 

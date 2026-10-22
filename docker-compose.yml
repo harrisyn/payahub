@@ -1,0 +1,19 @@
+# Local development: Postgres plus the API and a worker in one process.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: payahub
+      POSTGRES_DB: payahub
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+  payahub:
+    build: .
+    command: ["dev"]
+    environment:
+      DATABASE_URL: postgres://postgres:payahub@postgres:5432/payahub
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
