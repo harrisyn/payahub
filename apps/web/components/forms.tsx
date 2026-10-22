@@ -36,7 +36,7 @@ export function Submit({ children, className = "button" }: { children: React.Rea
   );
 }
 
-function Messages({ state }: { state: FormState }) {
+export function Messages({ state }: { state: FormState }) {
   return (
     <>
       {state.error && (

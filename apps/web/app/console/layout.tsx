@@ -11,7 +11,7 @@ import { requireOrg } from "@/lib/session";
 export const metadata: Metadata = { title: "Console", robots: { index: false, follow: false } };
 
 export default async function ConsoleLayout({ children }: { children: ReactNode }) {
-  const { organization: org, usage } = await requireOrg();
+  const { organization: org, usage, operator } = await requireOrg();
   const trial = org.plan === "trial" || org.plan === "enterprise_requested";
   return (
     <div className="app">
@@ -24,7 +24,7 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
             <span className="app-brand__org">{org.name}</span>
           </span>
         </Link>
-        <ConsoleNav />
+        <ConsoleNav operator={operator} />
         <p className="app-side__foot">
           <Link href="/docs">API docs</Link>
         </p>

@@ -12,9 +12,12 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 - [x] A clinic picks a payer and adds its platform account once; credentials sealed, write-only
 - [ ] The real payer list: every payer Serenity reaches today, its platform and its insurer code
       (blocked: needs read access to Serenity's database)
-- [ ] Operator console: add and edit payers, their platform fields and code lists without a deploy
-      (catalogue moves to the database; the JSON files stay as the seed)
-- [ ] Payer code-list import (CSV) with a coverage report per payer
+- [x] Operator console: add and edit payers, their platform fields and code lists without a deploy
+      (catalogue in the database, seeded once from the JSON files; every process refreshes within 5s;
+      change history per payer; `payahub operator EMAIL` grants the role)
+- [x] Payer code-list import (CSV) with coverage per kind, matches to confirm, and a check that every
+      saved code is in the payer's list
+- [x] Matching refuses names that share only a strength, form or sort ("Cetirizine 10 mg" is not "Amlodipine 10mg")
 
 ## 2. Services, medicines and diagnoses
 

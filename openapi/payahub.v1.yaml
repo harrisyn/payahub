@@ -240,6 +240,7 @@ paths:
                   organization: { $ref: "#/components/schemas/Organization" }
                   usage: { $ref: "#/components/schemas/Usage" }
                   recommendation: { $ref: "#/components/schemas/Recommendation" }
+                  operator: { type: boolean, description: Whether the user runs Payahub and may edit the shared catalogue }
                   onboarding:
                     type: array
                     items:
@@ -471,6 +472,146 @@ paths:
         "202": { description: Queued }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers:
+    get:
+      security: [{ session: [] }]
+      summary: Every catalogue payer, withdrawn ones included, with its settings and code coverage (operators only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/OperatorPayer" } }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers/{id}:
+    put:
+      security: [{ session: [] }]
+      summary: Add a payer to the shared catalogue or change one (operators only)
+      description: |
+        `fields` must be settings the chosen connector asks of each payer. Every organisation
+        sees the change within a few seconds. A withdrawn payer takes no new claims.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9_]{1,39}$" } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, country, connector]
+              properties:
+                name: { type: string }
+                country: { type: string, minLength: 2, maxLength: 2 }
+                connector: { type: string }
+                fields: { type: object, additionalProperties: { type: string } }
+                notes: { type: string }
+                inactive: { type: boolean }
+      responses:
+        "200": { description: Changed, content: { application/json: { schema: { $ref: "#/components/schemas/OperatorPayer" } } } }
+        "201": { description: Added, content: { application/json: { schema: { $ref: "#/components/schemas/OperatorPayer" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers/{id}/codes:
+    get:
+      security: [{ session: [] }]
+      summary: Every standard item with the payer's code, and matches from the payer's list for items without one
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: kind, in: query, schema: { enum: [service, lab, imaging, procedure, medication, consumable] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item: { $ref: "#/components/schemas/Item" }
+                        code: { type: object, nullable: true, properties: { code: { type: string }, description: { type: string } } }
+                        in_list: { type: boolean, description: Absent when the payer has no list loaded }
+                        generated: { type: boolean }
+                        suggestions: { type: array, items: { $ref: "#/components/schemas/CodeSuggestion" } }
+                  coverage: { type: object, additionalProperties: { type: object, properties: { coded: { type: integer }, total: { type: integer } } } }
+                  list_size: { type: integer }
+    put:
+      security: [{ session: [] }]
+      summary: Set or remove the payer's codes for standard items; an empty code removes it
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                changes:
+                  type: array
+                  items: { type: object, required: [item_id, code], properties: { item_id: { type: string }, code: { type: string, maxLength: 64 }, description: { type: string } } }
+      responses:
+        "200": { $ref: "#/components/responses/CodesApplied" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers/{id}/codes/accept:
+    post:
+      security: [{ session: [] }]
+      summary: Take the best match from the payer's list for every item without a code, where it is sure enough
+      description: A match is taken when its confidence is at least `min_confidence` (0.9 by default) and 0.1 ahead of the next.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { min_confidence: { type: number, minimum: 0.5, maximum: 1 } } }
+      responses:
+        "200": { $ref: "#/components/responses/CodesApplied" }
+  /v1/operator/payers/{id}/list:
+    put:
+      security: [{ session: [] }]
+      summary: Replace the payer's own code list from CSV (header row with code and name; group and price optional)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [csv], properties: { csv: { type: string, maxLength: 16777216 } } }
+      responses:
+        "200":
+          description: Loaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries: { type: integer }
+                  skipped: { type: array, items: { type: object, properties: { line: { type: integer }, reason: { type: string } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers/{id}/changes:
+    get:
+      security: [{ session: [] }]
+      summary: The latest 50 changes to a payer, newest first
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { enum: [seed, payer_created, payer_updated, codes_changed, list_loaded] }
+                        detail: { type: object }
+                        changed_by: { type: string }
+                        changed_at: { type: string, format: date-time }
 components:
   securitySchemes:
     apiKey: { type: http, scheme: bearer, description: "sk_sandbox_… or sk_live_…" }
@@ -479,6 +620,16 @@ components:
     IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
     ClaimID: { name: id, in: path, required: true, schema: { type: string } }
   responses:
+    CodesApplied:
+      description: Applied
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              applied: { type: integer }
+              warnings: { type: array, items: { type: string }, description: Codes not in the payer's list }
+              coded_items: { type: integer }
     Error:
       description: Error
       content:
@@ -673,6 +824,24 @@ components:
         check_message: { type: string }
         updated_at: { type: string, format: date-time }
     ItemKind: { enum: [service, lab, imaging, procedure, medication, consumable] }
+    OperatorPayer:
+      allOf:
+        - { $ref: "#/components/schemas/Payer" }
+        - type: object
+          properties:
+            fields: { type: object, additionalProperties: { type: string } }
+            inactive: { type: boolean }
+            missing_fields: { type: array, items: { type: string } }
+            list_size: { type: integer }
+            total_items: { type: integer }
+    CodeSuggestion:
+      type: object
+      properties:
+        code: { type: string }
+        name: { type: string }
+        group: { type: string }
+        price: { type: integer, description: Minor units }
+        confidence: { type: number }
     Item:
       type: object
       properties:

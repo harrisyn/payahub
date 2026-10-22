@@ -23,7 +23,26 @@ var (
 		"capsules": "capsule", "inj": "injection", "syr": "syrup", "susp": "suspension",
 		"consult": "consultation", "xray": "x-ray", "gm": "g",
 	}
+	// generic words say what sort of thing an item is, not which one. Two
+	// names that share only these and numbers ("Cetirizine 10 mg tablet",
+	// "Amlodipine 10mg Tab"; "Pregnancy test", "Widal test") are not a match.
+	generic = map[string]bool{
+		"mg": true, "mcg": true, "g": true, "ml": true, "iu": true, "tablet": true, "capsule": true,
+		"injection": true, "syrup": true, "suspension": true, "inhaler": true, "sachet": true, "cream": true,
+		"test": true, "tests": true, "function": true, "consultation": true,
+	}
 )
+
+// related reports whether two names share a word that says which item they
+// are, not just its strength, form or sort.
+func related(a, b []string) bool {
+	for _, t := range a {
+		if !generic[t] && !unicode.IsDigit(rune(t[0])) && slices.Contains(b, t) {
+			return true
+		}
+	}
+	return false
+}
 
 type indexed struct {
 	item    Item
@@ -117,9 +136,11 @@ func Suggest(name string, kind ItemKind, limit int) []Suggestion {
 		}
 		best := 0.0
 		for _, p := range x.phrases {
-			score := overlap(q, p)
+			score := 0.0
 			if slices.Equal(q, p) {
 				score = 0.97
+			} else if related(q, p) {
+				score = overlap(q, p)
 			}
 			best = max(best, score)
 		}
@@ -163,9 +184,11 @@ func SuggestPayerCodes(payerID, itemID string, limit int) []CodeSuggestion {
 	for _, e := range c.lists[payerID] {
 		best := 0.0
 		for _, p := range x.phrases {
-			score := overlap(e.words, p)
+			score := 0.0
 			if slices.Equal(e.words, p) {
 				score = 0.97
+			} else if related(e.words, p) {
+				score = overlap(e.words, p)
 			}
 			best = max(best, score)
 		}
