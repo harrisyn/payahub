@@ -1,4 +1,4 @@
-import type { ClaimState, Method } from "./types";
+import type { ClaimState, Item, ItemKind, Method } from "./types";
 
 export const money = (minor: number, currency = "GHS") =>
   `${currency} ${(minor / 100).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -55,3 +55,16 @@ export const planName: Record<string, string> = {
   enterprise_requested: "Enterprise (requested)",
   enterprise: "Enterprise",
 };
+
+export const kindName: Record<ItemKind, string> = {
+  service: "Service",
+  lab: "Lab test",
+  imaging: "Imaging",
+  procedure: "Procedure",
+  medication: "Medicine",
+  consumable: "Consumable",
+};
+
+export function itemLabel(it: Item) {
+  return `${it.name} (${kindName[it.kind]}, ${it.id})`;
+}

@@ -7,7 +7,9 @@ product; the web app configures it. Decisions: `docs/adr/`.
 
 - `cmd/payahub` the one backend binary: `api`, `worker`, `migrate`, `dev`
 - `internal/claim` canonical claim, lifecycle states (money in minor units)
-- `internal/connector` connector SDK (typed verbs, manifest, error taxonomy); one package per payer
+- `internal/catalog` shared payers (standalone or behind a platform) and standard items, as data in `data/`;
+  item suggestions and line resolution (own code -> standard item -> payer code)
+- `internal/connector` connector SDK (typed verbs, manifest, error taxonomy); one package per platform
 - `internal/engine` edit rules, submission strategy, send and outcome
 - `internal/store` Postgres (pgx), embedded idempotent migrations, audit events
 - `internal/queue` River jobs: transactional enqueue, submit worker with reconciliation
@@ -33,8 +35,10 @@ product; the web app configures it. Decisions: `docs/adr/`.
   with `FindClaim` before resending.
 - **No model output goes to a payer.** Connectors build payloads from validated fields. AI-set
   fields carry `Evidence`; below the per-use threshold a claim goes to `needs_review`.
-- **Payer knowledge is data.** New payer behaviour goes in the connector manifest
-  (`SubmissionConfig`, verbs, credentials), not in engine branches.
+- **Payer knowledge is data.** A new payer is a catalogue entry (`internal/catalog/data/payers.json`),
+  never a per-organisation record; platform behaviour goes in the connector manifest
+  (`SubmissionConfig`, verbs, `Credentials` for the organisation's account, `PayerFields` for each payer),
+  not in engine branches.
 - **Translate payer errors once, at the connector edge**, into `connector.ErrorCode`.
 - **Every write endpoint honours `Idempotency-Key`.**
 - **Credentials are write-only.** Sealed on save, opened only by the worker; no endpoint returns them.

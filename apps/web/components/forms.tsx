@@ -3,9 +3,29 @@
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { checkPayer, choosePlan, createKey, saveProfile, savePayer, signIn, signUp, type FormState } from "@/app/actions";
+import {
+  checkAccount,
+  choosePlan,
+  createKey,
+  saveAccount,
+  saveMappings,
+  savePayerUse,
+  saveProfile,
+  signIn,
+  signUp,
+  suggestMappings,
+  type FormState,
+} from "@/app/actions";
+import { itemLabel } from "@/lib/format";
 import { ghs, plans, TRIAL_DAYS, TRIAL_LIVE_CLAIMS } from "@/lib/pricing";
-import type { CredentialField, Manifest, PayerSetting, Profile } from "@/lib/types";
+import type {
+  Connector,
+  ConnectorAccount,
+  CredentialField,
+  Payer,
+  PayerSetting,
+  Profile,
+} from "@/lib/types";
 
 export function Submit({ children, className = "button" }: { children: React.ReactNode; className?: string }) {
   const { pending } = useFormStatus();
@@ -140,7 +160,7 @@ const leave = [
   { v: "integration", l: "Sent by an existing integration" },
 ];
 
-export function ProfileForm({ profile, payers }: { profile: Profile | null; payers: Manifest[] }) {
+export function ProfileForm({ profile, payers }: { profile: Profile | null; payers: Payer[] }) {
   const [s, action] = useActionState(saveProfile, {});
   const chosen = new Set(profile?.payers ?? []);
   return (
@@ -199,7 +219,10 @@ export function ProfileForm({ profile, payers }: { profile: Profile | null; paye
           {payers.map((p) => (
             <label key={p.id} className="app-choice">
               <input type="checkbox" name="payers" value={p.id} defaultChecked={chosen.has(p.id)} />
-              {p.name}
+              <span>
+                {p.name}
+                {p.kind === "integrated" && <span className="app-muted"> through {p.connector.name}</span>}
+              </span>
             </label>
           ))}
         </div>
@@ -212,39 +235,39 @@ export function ProfileForm({ profile, payers }: { profile: Profile | null; paye
   );
 }
 
-export function PayerForm({ manifest, env, setting }: { manifest: Manifest; env: "sandbox" | "live"; setting?: PayerSetting }) {
-  const [s, action] = useActionState(savePayer, {});
-  const set = new Set(setting?.credential_fields ?? []);
+export function PayerUseForm({ payer, env, setting }: { payer: Payer; env: "sandbox" | "live"; setting?: PayerSetting }) {
+  const [s, action] = useActionState(savePayerUse, {});
+  const platform = payer.connector.name;
   return (
-    <form action={action} className="app-form" noValidate autoComplete="off">
-      <input type="hidden" name="payer" value={manifest.id} />
+    <form action={action} className="app-form" noValidate>
+      <input type="hidden" name="payer" value={payer.id} />
       <input type="hidden" name="environment" value={env} />
       <label className="app-switchrow">
         <input type="checkbox" name="enabled" defaultChecked={setting?.enabled ?? true} />
         <span>
-          <span className="app-step__title">Send {env} claims to {manifest.name}</span>
-          <span className="app-muted">Turn off to stop new claims without removing the credentials.</span>
+          <span className="app-step__title">
+            Send {env} claims to {payer.name}
+          </span>
+          <span className="app-muted">Turn off to stop new claims; your account stays saved.</span>
         </span>
       </label>
-      {manifest.credentials.length > 0 && (
-        <div className="app-creds">
-          {manifest.credentials.map((f: CredentialField) => (
-            <Field
-              key={f.name}
-              label={f.label + (f.required ? "" : " (optional)")}
-              name={`cred_${f.name}`}
-              type={f.secret ? "password" : "text"}
-              autoComplete="off"
-              placeholder={set.has(f.name) ? "Saved. Type to replace" : ""}
-            />
-          ))}
-        </div>
+      {payer.kind === "integrated" && (
+        <fieldset className="app-fieldset">
+          <legend>
+            {payer.name} is reached through {platform}. Do you have a {platform} account?
+          </legend>
+          <div className="app-choices app-choices--inline">
+            <label className="app-choice">
+              <input type="radio" name="account" value="have" defaultChecked={setting?.account !== "need"} />
+              Yes
+            </label>
+            <label className="app-choice">
+              <input type="radio" name="account" value="need" defaultChecked={setting?.account === "need"} />
+              Not yet
+            </label>
+          </div>
+        </fieldset>
       )}
-      <p className="app-muted">
-        {manifest.credentials.length
-          ? "To change one field, re-enter them all: credentials are sealed together and never shown again."
-          : "The sandbox insurer needs no credentials."}
-      </p>
       <div className="app-form__foot">
         <Submit className="app-button app-button--primary">Save</Submit>
         <Messages state={s} />
@@ -253,15 +276,127 @@ export function PayerForm({ manifest, env, setting }: { manifest: Manifest; env:
   );
 }
 
-export function CheckForm({ payer, env }: { payer: string; env: string }) {
-  const [s, action] = useActionState(checkPayer, {});
+export function AccountForm({
+  connector,
+  env,
+  account,
+}: {
+  connector: Connector;
+  env: "sandbox" | "live";
+  account?: ConnectorAccount;
+}) {
+  const [s, action] = useActionState(saveAccount, {});
+  const set = new Set(account?.credential_fields ?? []);
+  return (
+    <form action={action} className="app-form" noValidate autoComplete="off">
+      <input type="hidden" name="connector" value={connector.id} />
+      <input type="hidden" name="environment" value={env} />
+      <div className="app-creds">
+        {connector.credentials.map((f: CredentialField) => (
+          <Field
+            key={f.name}
+            label={f.label + (f.required ? "" : " (optional)")}
+            name={`cred_${f.name}`}
+            type={f.secret ? "password" : "text"}
+            autoComplete="off"
+            placeholder={set.has(f.name) ? "Saved. Type to replace" : ""}
+          />
+        ))}
+      </div>
+      <p className="app-muted">
+        To change one field, re-enter them all: credentials are sealed together and never shown again.
+      </p>
+      <div className="app-form__foot">
+        <Submit className="app-button app-button--primary">Save account</Submit>
+        <Messages state={s} />
+      </div>
+    </form>
+  );
+}
+
+export function CheckForm({ connector, env, show = false }: { connector: string; env: string; show?: boolean }) {
+  const [s, action] = useActionState(checkAccount, {});
   return (
     <form action={action} className="app-inline-form">
-      <input type="hidden" name="payer" value={payer} />
+      <input type="hidden" name="connector" value={connector} />
       <input type="hidden" name="environment" value={env} />
+      {show && <input type="hidden" name="show" value="1" />}
       <Submit className="app-button">Check connection</Submit>
       <Messages state={s} />
     </form>
+  );
+}
+
+// MappingForm turns a pasted price list into suggested standard items, which
+// a person confirms line by line before anything is saved.
+export function MappingForm() {
+  const [found, suggest] = useActionState(suggestMappings, {});
+  const [saved, save] = useActionState(saveMappings, {});
+  return (
+    <div className="app-stack">
+      <form action={suggest} className="app-form" noValidate>
+        <div className="field">
+          <label htmlFor="f-list">Your items, one per line: your code, then its name</label>
+          <textarea
+            id="f-list"
+            name="list"
+            rows={6}
+            className="app-textarea"
+            placeholder={"CONS, OPD consultation\nPCM500, Paracetamol 500mg tabs\nFBC, Full blood count"}
+          />
+        </div>
+        <div className="app-form__foot">
+          <Submit className="app-button app-button--primary">Suggest matches</Submit>
+          <Messages state={{ error: found.error }} />
+        </div>
+      </form>
+      {found.rows && (
+        <form action={save} className="app-form" noValidate>
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th scope="col">Your code</th>
+                <th scope="col">Your name</th>
+                <th scope="col">Standard item</th>
+              </tr>
+            </thead>
+            <tbody>
+              {found.rows.map((r, i) => (
+                <tr key={`${r.code}-${i}`}>
+                  <td className="app-id">
+                    {r.code}
+                    <input type="hidden" name="row" value={i} />
+                    <input type="hidden" name={`code_${i}`} value={r.code} />
+                    <input type="hidden" name={`name_${i}`} value={r.name} />
+                  </td>
+                  <td>{r.name}</td>
+                  <td>
+                    <label className="sr-only" htmlFor={`f-item-${i}`}>
+                      Standard item for {r.code}
+                    </label>
+                    <select id={`f-item-${i}`} name={`item_${i}`} defaultValue={r.suggestions[0]?.confidence >= 0.6 ? r.suggestions[0].item.id : ""}>
+                      <option value="">Skip for now</option>
+                      {r.suggestions.map((sg) => (
+                        <option key={sg.item.id} value={sg.item.id}>
+                          {itemLabel(sg.item)}, {Math.round(sg.confidence * 100)}% match
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="app-muted">
+            Matches of 60% or more are picked for you; check each one. Nothing is used on a claim until you save it.
+          </p>
+          <div className="app-form__foot">
+            <Submit className="app-button app-button--primary">Save these mappings</Submit>
+            <Messages state={saved} />
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 

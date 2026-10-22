@@ -181,6 +181,12 @@ const switches = [
     on: false,
   },
   {
+    text: "Map each code once, for every insurer",
+    then: "Match your price list to our standard list of services and medicines. Every insurer's own codes follow from it.",
+    field: "navy",
+    on: false,
+  },
+  {
     text: "Draft claims from scanned forms",
     then: "Upload PDFs or photos and check the drafts we make. In build now; the API is ready today.",
     field: "white",

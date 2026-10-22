@@ -21,6 +21,7 @@ const Key = "smartclaims"
 var manifest = connector.Manifest{
 	Key:     Key,
 	Name:    "SmartClaims",
+	Kind:    connector.KindPlatform,
 	Country: "GH",
 	Channel: connector.ChannelAPI,
 	Verbs: []connector.Verb{
@@ -33,7 +34,11 @@ var manifest = connector.Manifest{
 		{Name: "base_url", Label: "API base URL", Required: true},
 		{Name: "username", Label: "Username", Required: true},
 		{Name: "password", Label: "Password", Secret: true, Required: true},
-		{Name: "hicd", Label: "Facility code (HICD)", Required: true},
+	},
+	// HICD is the insurer's ID on SmartClaims (core-api-v2 reads it from the
+	// payer's external reference), so it belongs to the payer, not the clinic.
+	PayerFields: []connector.CredentialField{
+		{Name: "hicd", Label: "Health insurance company ID (HICD)", Required: true},
 	},
 	Submission: connector.DefaultSubmissionConfig(),
 	Status:     connector.StatusPorting,

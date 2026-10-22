@@ -605,6 +605,10 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .app-card { border: 1px solid var(--edge); border-radius: 12px; padding: 20px; display: grid; gap: 14px; align-content: start; min-width: 0; }
 .app-card--flush { padding: 4px 20px; }
 .app-card__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.app-card__head--pad { padding: 16px 0 12px; flex-wrap: wrap; }
+.app-pad { padding: 0 0 16px; }
+.app-textarea { width: 100%; min-height: 120px; padding: 10px 12px; border: 1px solid #e3e8ee; border-radius: 8px; font: inherit; font-size: 14px; resize: vertical; background: var(--a-surface, #fff); color: inherit; }
+.app-form select { max-width: 100%; }
 .app-card__actions { display: flex; align-items: center; gap: 12px; }
 .app-card__title { font-size: 16px; line-height: 22px; font-weight: 700; }
 .app-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -642,6 +646,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .app-pill--neutral { background: #eef2f6; color: #33414e; }
 .app-tag { margin-left: 8px; font-size: 12px; color: var(--a-muted); background: #eef2f6; padding: 1px 6px; border-radius: 4px; font-weight: 500; }
 .show-sm { display: none; }
+.app-id { white-space: nowrap; }
 .app-id, .app td.num { font-family: var(--font-mono), ui-monospace, Menlo, monospace; font-size: 13px; }
 .app-figures dd.num, .app-strip dd.num, .app-top .num { font-family: var(--font); font-size: inherit; font-variant-numeric: tabular-nums; }
 a.app-id { color: var(--text); }

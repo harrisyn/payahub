@@ -30,33 +30,75 @@ export type OrgView = {
   organization: Organization;
   usage: Usage;
   recommendation?: Recommendation;
-  onboarding: { id: "account" | "profile" | "payers" | "first_claim" | "go_live"; done: boolean }[];
+  onboarding: { id: "account" | "profile" | "payers" | "items" | "first_claim" | "go_live"; done: boolean }[];
 };
 
 export type CredentialField = { name: string; label: string; secret: boolean; required: boolean };
 
-export type Manifest = {
+// A connector reaches payers: a platform carries many (XCeli, Medserve...),
+// a direct one is a single payer's own interface.
+export type Connector = {
   id: string;
   name: string;
+  kind: "platform" | "direct";
   country: string;
   channel: "api" | "portal" | "email";
   capabilities: string[];
   member_otp_required: boolean;
   credentials: CredentialField[];
+  payer_fields: CredentialField[];
   notes?: string;
   status: "available" | "porting";
+};
+
+// A payer from the shared catalogue.
+export type Payer = {
+  id: string;
+  name: string;
+  country: string;
+  kind: "standalone" | "integrated";
+  connector: { id: string; name: string; kind: "platform" | "direct"; status: "available" | "porting" };
+  status: "available" | "connecting";
+  member_otp_required: boolean;
+  capabilities: string[];
+  coded_items: number;
+  notes?: string;
 };
 
 export type PayerSetting = {
   payer_id: string;
   environment: "sandbox" | "live";
   enabled: boolean;
+  account?: "have" | "need";
+  updated_at: string;
+};
+
+export type ConnectorAccount = {
+  connector: string;
+  environment: "sandbox" | "live";
   credential_fields: string[];
   checked_at: string | null;
   check_ok: boolean | null;
   check_message?: string;
   updated_at: string;
 };
+
+export type ItemKind = "service" | "lab" | "imaging" | "procedure" | "medication" | "consumable";
+
+export type Item = {
+  id: string;
+  kind: ItemKind;
+  name: string;
+  generic?: string;
+  strength?: string;
+  form?: string;
+  synonyms?: string[];
+  codes?: { system: string; value: string }[];
+};
+
+export type Suggestion = { item: Item; confidence: number };
+
+export type ItemMapping = { local_code: string; local_name: string; item_id: string; confirmed_by: string; updated_at: string };
 
 export type APIKey = {
   id: string;

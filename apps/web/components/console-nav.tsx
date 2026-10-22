@@ -7,6 +7,7 @@ const items = [
   { href: "/console", label: "Overview" },
   { href: "/console/setup", label: "How you bill" },
   { href: "/console/insurers", label: "Insurers" },
+  { href: "/console/items", label: "Services and medicines" },
   { href: "/console/claims", label: "Claims" },
   { href: "/console/developers", label: "Developers" },
   { href: "/console/plan", label: "Plan and usage" },

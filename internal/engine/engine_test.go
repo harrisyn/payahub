@@ -70,7 +70,7 @@ var counter int
 func nextID() int { counter++; return counter }
 
 func TestValidateStates(t *testing.T) {
-	m := (sandbox.Sandbox{}).Manifest()
+	m, _, _ := connector.Lookup(sandbox.Key)
 	if v := Validate(goodClaim(), m, nil); v.State != claim.Ready || len(v.Issues) != 0 {
 		t.Fatalf("clean claim: %+v", v)
 	}
@@ -97,7 +97,7 @@ func TestValidateStates(t *testing.T) {
 }
 
 func TestSendBothPaths(t *testing.T) {
-	conn, _ := sandbox.New(nil)
+	conn, _ := sandbox.New(connector.Account{})
 	for _, plan := range []Plan{{"realtime", "early"}, {"bulk", "deferred"}} {
 		c := goodClaim()
 		r, err := Send(context.Background(), conn, c, plan)
@@ -126,7 +126,7 @@ func TestDecide(t *testing.T) {
 }
 
 func BenchmarkValidate(b *testing.B) {
-	m := (sandbox.Sandbox{}).Manifest()
+	m, _, _ := connector.Lookup(sandbox.Key)
 	c := goodClaim()
 	for i := 0; i < 19; i++ {
 		c.Lines = append(c.Lines, c.Lines[0])

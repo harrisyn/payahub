@@ -71,8 +71,16 @@ func (u Unsupported) FindClaim(context.Context, *claim.Claim) (*Receipt, error) 
 	return nil, u.err(FindClaim)
 }
 
-// Factory builds a connector from an organisation's credentials for that payer.
-type Factory func(credentials map[string]string) (Connector, error)
+// Account is what a connector is built from: the organisation's credentials
+// on the connector and the catalogue's fields for the payer being reached.
+type Account struct {
+	Credentials map[string]string
+	PayerID     string
+	PayerFields map[string]string
+}
+
+// Factory builds a connector for one organisation and payer.
+type Factory func(Account) (Connector, error)
 
 type registration struct {
 	manifest Manifest
@@ -93,6 +101,12 @@ func Register(m Manifest, f Factory) {
 	}
 	if m.Credentials == nil {
 		m.Credentials = []CredentialField{} // JSON [] rather than null
+	}
+	if m.PayerFields == nil {
+		m.PayerFields = []CredentialField{}
+	}
+	if m.Kind == "" {
+		m.Kind = KindPlatform
 	}
 	registry[m.Key] = registration{manifest: m, factory: f}
 }
@@ -125,10 +139,20 @@ func CheckCredentials(m Manifest, creds map[string]string) error {
 	return nil
 }
 
+// CheckPayerFields reports required payer fields the catalogue has not set.
+func CheckPayerFields(m Manifest, fields map[string]string) error {
+	for _, f := range m.PayerFields {
+		if f.Required && fields[f.Name] == "" {
+			return Errorf(InvalidCredentials, "the payer has no %q on %s yet", f.Name, m.Name)
+		}
+	}
+	return nil
+}
+
 // Pending is the factory for a connector whose manifest is known but whose
 // adapter is not ported yet: every verb answers NOT_SUPPORTED.
 func Pending(m Manifest) Factory {
-	return func(map[string]string) (Connector, error) {
+	return func(Account) (Connector, error) {
 		return pending{Unsupported{Name: m.Name + " (not yet ported)"}, m}, nil
 	}
 }
@@ -140,14 +164,17 @@ type pending struct {
 
 func (p pending) Manifest() Manifest { return p.m }
 
-// New builds the connector registered under key.
-func New(key string, creds map[string]string) (Connector, error) {
+// New builds the connector registered under key for one organisation's account.
+func New(key string, a Account) (Connector, error) {
 	m, f, ok := Lookup(key)
 	if !ok {
 		return nil, fmt.Errorf("unknown connector %q", key)
 	}
-	if err := CheckCredentials(m, creds); err != nil {
+	if err := CheckCredentials(m, a.Credentials); err != nil {
 		return nil, err
 	}
-	return f(creds)
+	if err := CheckPayerFields(m, a.PayerFields); err != nil {
+		return nil, err
+	}
+	return f(a)
 }

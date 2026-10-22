@@ -16,6 +16,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
@@ -79,9 +80,9 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 	if queued || c.State == claim.Submitted || c.State.Billable() {
 		return c, engine.Validation{Issues: []engine.Issue{}, State: c.State}, nil
 	}
-	m, ok := manifestFor(c)
-	if !ok {
-		return nil, engine.Validation{}, fmt.Errorf("%w %q", ErrUnknownPayer, c.PayerID)
+	m, err := Prepare(ctx, tx, c)
+	if err != nil {
+		return nil, engine.Validation{}, err
 	}
 	if c.Environment == "live" {
 		allowed, err := store.TrialAllowsLive(ctx, tx, c.OrganizationID)
@@ -125,32 +126,62 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 	return c, v, tx.Commit(ctx)
 }
 
-// manifestFor gives the rules for the claim's payer. Sandbox claims are sent
-// to the sandbox payer but checked against the named payer's rules, so trials
-// see realistic validation.
+// Prepare gives the claim's lines their standard items and the payer's codes
+// (from the organisation's confirmed item mappings) and returns the rules of
+// the connector that reaches the payer. Sandbox claims are sent to the
+// sandbox payer but checked against the named payer's rules, so trials see
+// realistic validation.
+func Prepare(ctx context.Context, q store.Querier, c *claim.Claim) (connector.Manifest, error) {
+	m, ok := manifestFor(c)
+	if !ok {
+		return m, fmt.Errorf("%w %q", ErrUnknownPayer, c.PayerID)
+	}
+	mapped, err := store.MappedItems(ctx, q, c.OrganizationID, catalog.LocalCodes(c))
+	if err != nil {
+		return m, err
+	}
+	catalog.Resolve(c, mapped)
+	return m, nil
+}
+
 func manifestFor(c *claim.Claim) (connector.Manifest, bool) {
-	m, _, ok := connector.Lookup(c.PayerID)
+	p, ok := catalog.LookupPayer(c.PayerID)
+	if !ok {
+		return connector.Manifest{}, false
+	}
+	m, _, ok := connector.Lookup(p.Connector)
 	return m, ok
 }
 
 // connectorFor builds the claim's connector: the sandbox payer for sandbox
-// claims, otherwise the payer's connector with the organisation's credentials
-// opened from the vault.
+// claims, otherwise the connector that reaches the payer, with the
+// organisation's account on it opened from the vault and the payer's
+// catalogue fields.
 func (w *SubmitWorker) connectorFor(ctx context.Context, c *claim.Claim) (connector.Connector, error) {
 	if c.Environment == "sandbox" {
-		return sandbox.New(nil)
+		return sandbox.New(connector.Account{})
 	}
+	p, ok := catalog.LookupPayer(c.PayerID)
+	if !ok {
+		return nil, connector.Errorf(connector.Validation, "unknown payer %q", c.PayerID)
+	}
+	return OpenAccount(ctx, w.Store.Pool, w.Vault, c.OrganizationID, p, c.Environment)
+}
+
+// OpenAccount builds the connector that reaches payer p for an organisation,
+// with its sealed account credentials opened.
+func OpenAccount(ctx context.Context, q store.Querier, v *vault.Vault, orgID string, p catalog.Payer, env string) (connector.Connector, error) {
 	creds := map[string]string{}
-	sealed, err := store.SealedCredentials(ctx, w.Store.Pool, c.OrganizationID, c.PayerID, c.Environment)
+	sealed, err := store.SealedAccount(ctx, q, orgID, p.Connector, env)
 	if err != nil {
 		return nil, err
 	}
 	if sealed != nil {
-		if creds, err = w.Vault.Open(sealed, vault.Owner(c.OrganizationID, c.PayerID, c.Environment)); err != nil {
+		if creds, err = v.Open(sealed, vault.Owner(orgID, p.Connector, env)); err != nil {
 			return nil, err
 		}
 	}
-	return connector.New(c.PayerID, creds)
+	return connector.New(p.Connector, connector.Account{Credentials: creds, PayerID: p.ID, PayerFields: p.Fields})
 }
 
 // SubmitWorker sends one claim. It never holds a database transaction open

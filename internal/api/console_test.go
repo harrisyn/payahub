@@ -63,7 +63,7 @@ func TestSignupLoginAndSessionOnlyRoutes(t *testing.T) {
 		t.Fatalf("organization = %v", o)
 	}
 	steps := org["onboarding"].([]any)
-	if len(steps) != 5 || steps[0].(map[string]any)["done"] != true || steps[1].(map[string]any)["done"] != false {
+	if len(steps) != 6 || steps[0].(map[string]any)["done"] != true || steps[1].(map[string]any)["done"] != false {
 		t.Fatalf("steps = %v", steps)
 	}
 
@@ -79,7 +79,7 @@ func TestProfileRecommendsAMethod(t *testing.T) {
 	ses, _ := signup(t, setup(t))
 	s, out := ses.do(t, "PUT", "/v1/organization/profile", map[string]any{
 		"billing_system": "spreadsheets", "claims_leave_by": "email", "monthly_claims": 400,
-		"has_developers": false, "payers": []string{"xceli", "sandbox"},
+		"has_developers": false, "payers": []string{"glico", "sandbox"},
 	})
 	rec := out["recommendation"].(map[string]any)
 	if s != 200 || rec["method"] != "batch" || rec["available"] != false || rec["fallback"] != "rest" {
@@ -96,42 +96,67 @@ func TestProfileRecommendsAMethod(t *testing.T) {
 	}
 }
 
-func TestPayerCredentialsAreSealedAndChecked(t *testing.T) {
+func TestPlatformAccountsAreSealedAndChecked(t *testing.T) {
 	ses, _ := signup(t, setup(t))
-	creds := map[string]any{
-		"auth_base_url": "https://auth.example", "insurer_api_url": "https://api.example",
-		"username": "ridge", "password": "hunter2-very-secret", "provider_id": "269", "provider_name": "Ridge",
+	// GLICO sits behind XCeli: the organisation turns GLICO on and says it
+	// has an XCeli account, then enters that account once.
+	s, out := ses.do(t, "PUT", "/v1/payer-settings/glico/live", map[string]any{"enabled": true, "account": "have"})
+	if s != 200 || out["data"].([]any)[0].(map[string]any)["account"] != "have" {
+		t.Fatalf("payer setting: %d %v", s, out)
 	}
-	if s, out := ses.do(t, "PUT", "/v1/payer-settings/xceli/live", map[string]any{
-		"enabled": true, "credentials": map[string]any{"username": "only-this"},
+	creds := map[string]any{
+		"auth_base_url": "https://auth.example", "username": "ridge", "password": "hunter2-very-secret",
+		"provider_id": "269", "provider_name": "Ridge",
+	}
+	if s, out := ses.do(t, "PUT", "/v1/connector-accounts/xceli/live", map[string]any{
+		"credentials": map[string]any{"username": "only-this"},
 	}); s != 422 || out["error"].(map[string]any)["code"] != "missing_credentials" {
 		t.Fatalf("missing credentials accepted: %d %v", s, out)
 	}
-	s, out := ses.do(t, "PUT", "/v1/payer-settings/xceli/live", map[string]any{"enabled": true, "credentials": creds})
-	if s != 200 {
+	if s, out := ses.do(t, "PUT", "/v1/connector-accounts/xceli/live", map[string]any{
+		"credentials": map[string]any{"insurer_api_url": "https://x"},
+	}); s != 422 || out["error"].(map[string]any)["code"] != "unknown_credential" {
+		t.Fatalf("payer field accepted as an account credential: %d %v", s, out)
+	}
+	s, out = ses.do(t, "PUT", "/v1/connector-accounts/xceli/live", map[string]any{"credentials": creds})
+	if s != 200 || len(out["data"].([]any)[0].(map[string]any)["credential_fields"].([]any)) != 5 {
 		t.Fatalf("save: %d %v", s, out)
 	}
-	row := out["data"].([]any)[0].(map[string]any)
-	if len(row["credential_fields"].([]any)) != 6 {
-		t.Fatalf("fields = %v", row)
-	}
-	// The secret is stored sealed, never in the clear.
 	var sealed []byte
 	if err := st.Pool.QueryRow(context.Background(),
-		`SELECT credentials_sealed FROM payer_settings WHERE payer_id = 'xceli' AND credential_fields <> '{}' ORDER BY updated_at DESC LIMIT 1`).
+		`SELECT credentials_sealed FROM connector_accounts WHERE connector = 'xceli' ORDER BY updated_at DESC LIMIT 1`).
 		Scan(&sealed); err != nil || len(sealed) == 0 || strings.Contains(string(sealed), "hunter2") {
 		t.Fatalf("credentials not sealed: %v", err)
 	}
-	s, check := ses.do(t, "POST", "/v1/payer-settings/xceli/live/check", nil)
+	s, check := ses.do(t, "POST", "/v1/connector-accounts/xceli/live/check", nil)
 	if s != 200 || check["ok"] != false || !strings.Contains(check["message"].(string), "still being connected") {
 		t.Fatalf("check xceli: %d %v", s, check)
 	}
-	ses.do(t, "PUT", "/v1/payer-settings/sandbox/sandbox", map[string]any{"enabled": true})
-	if s, check := ses.do(t, "POST", "/v1/payer-settings/sandbox/sandbox/check", nil); s != 200 || check["ok"] != true {
+
+	// One Sandbox Exchange account serves both payers behind it.
+	ses.do(t, "PUT", "/v1/payer-settings/sandbox_life/sandbox", map[string]any{"enabled": true, "account": "have"})
+	if s, _ := ses.do(t, "POST", "/v1/connector-accounts/sandbox_exchange/sandbox/check", nil); s != 422 {
+		t.Fatalf("check without an account: %d", s)
+	}
+	ses.do(t, "PUT", "/v1/connector-accounts/sandbox_exchange/sandbox", map[string]any{
+		"credentials": map[string]any{"username": "ridge", "password": "any"},
+	})
+	s, check = ses.do(t, "POST", "/v1/connector-accounts/sandbox_exchange/sandbox/check", nil)
+	if s != 200 || check["ok"] != true || !strings.Contains(check["message"].(string), "Sandbox Life") {
+		t.Fatalf("check exchange: %d %v", s, check)
+	}
+	// The standalone sandbox payer needs no account at all.
+	if s, check := ses.do(t, "POST", "/v1/connector-accounts/sandbox/sandbox/check", nil); s != 200 || check["ok"] != true {
 		t.Fatalf("check sandbox: %d %v", s, check)
 	}
 	if s, _ := ses.do(t, "PUT", "/v1/payer-settings/nobody/live", map[string]any{"enabled": true}); s != 404 {
 		t.Fatalf("unknown payer: %d", s)
+	}
+	if s, _ := ses.do(t, "PUT", "/v1/payer-settings/glico/live", map[string]any{"enabled": true, "account": "maybe"}); s != 422 {
+		t.Fatalf("bad account answer: %d", s)
+	}
+	if s, _ := ses.do(t, "PUT", "/v1/connector-accounts/nobody/live", map[string]any{"credentials": map[string]any{}}); s != 404 {
+		t.Fatalf("unknown connector: %d", s)
 	}
 }
 
@@ -165,7 +190,7 @@ func TestAPIKeysAndConsoleClaims(t *testing.T) {
 		t.Fatalf("claims = %v", claims)
 	}
 	_, org := ses.do(t, "GET", "/v1/organization", nil)
-	if org["onboarding"].([]any)[3].(map[string]any)["done"] != true {
+	if org["onboarding"].([]any)[4].(map[string]any)["done"] != true {
 		t.Fatalf("first claim step not done: %v", org["onboarding"])
 	}
 	if s, plan := ses.do(t, "PUT", "/v1/organization/plan", map[string]any{"plan": "enterprise"}); s != 200 || plan["plan"] != "enterprise_requested" {

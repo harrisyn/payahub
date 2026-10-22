@@ -71,6 +71,19 @@ token, never an API key.
 In production run `payahub migrate` once per deploy, then any number of
 `payahub api` and `payahub worker` processes.
 
+## Payers, platforms and standard items
+
+Payers are one shared catalogue (`internal/catalog/data/payers.json`), set up
+once for every organisation. A payer is standalone (reached directly) or sits
+behind a platform such as XCeli or Medserve; the catalogue holds its code on
+that platform. An organisation adds its account on a platform once, and it
+serves every payer the platform carries.
+
+Billable items have one standard list (`items.json`: services, labs, imaging,
+procedures, medicines, consumables). An organisation maps its own codes to it
+once; payer codes hang off the standard items (`data/codes/<payer>.json`). A
+claim line travels own code -> standard item -> the payer's code.
+
 ## How a claim is never lost
 
 See [ADR 0003](docs/adr/0003-durable-queue.md). In short: the claim change and
@@ -84,7 +97,8 @@ already has the claim before sending again; every step is in the audit trail.
 | --- | --- |
 | `cmd/payahub` | The backend binary: `api`, `worker`, `migrate`, `dev` |
 | `internal/claim` | Canonical claim and lifecycle |
-| `internal/connector` | Connector SDK, sandbox payer, payer connectors |
+| `internal/catalog` | Shared payer catalogue and standard item list (data in `data/`), suggestions, line resolution |
+| `internal/connector` | Connector SDK, sandbox payer, platform connectors |
 | `internal/engine` | Edit rules, submission strategy, send and outcome |
 | `internal/store` | Postgres, migrations, audit events |
 | `internal/queue` | Durable submission jobs (River) |

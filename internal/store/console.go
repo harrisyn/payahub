@@ -320,71 +320,171 @@ func (s *Store) RevokeAPIKey(ctx context.Context, orgID, id string) error {
 	return err
 }
 
+// PayerSetting is an organisation's use of one catalogue payer.
 type PayerSetting struct {
-	PayerID          string     `json:"payer_id"`
-	Environment      string     `json:"environment"`
-	Enabled          bool       `json:"enabled"`
-	CredentialFields []string   `json:"credential_fields"`
-	CheckedAt        *time.Time `json:"checked_at"`
-	CheckOK          *bool      `json:"check_ok"`
-	CheckMessage     string     `json:"check_message,omitempty"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	PayerID     string `json:"payer_id"`
+	Environment string `json:"environment"`
+	Enabled     bool   `json:"enabled"`
+	// Account answers "do you have an account on this payer's platform?":
+	// "have", "need", or empty when not asked yet.
+	Account   string    `json:"account,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (s *Store) ListPayerSettings(ctx context.Context, orgID string) ([]PayerSetting, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT payer_id, environment, enabled, credential_fields, checked_at, check_ok,
-		       coalesce(check_message, ''), updated_at
+		SELECT payer_id, environment, enabled, coalesce(account, ''), updated_at
 		FROM payer_settings WHERE organization_id = $1 ORDER BY payer_id, environment`, orgID)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (PayerSetting, error) {
 		var p PayerSetting
-		return p, r.Scan(&p.PayerID, &p.Environment, &p.Enabled, &p.CredentialFields, &p.CheckedAt,
-			&p.CheckOK, &p.CheckMessage, &p.UpdatedAt)
+		return p, r.Scan(&p.PayerID, &p.Environment, &p.Enabled, &p.Account, &p.UpdatedAt)
 	})
 }
 
-// SavePayerSetting enables or disables a payer. With sealed credentials it
-// replaces them and clears the last connection check.
-func (s *Store) SavePayerSetting(ctx context.Context, orgID, payerID, env string, enabled bool, sealed []byte, fields []string) error {
-	if sealed == nil {
-		_, err := s.Pool.Exec(ctx, `
-			INSERT INTO payer_settings (organization_id, payer_id, environment, enabled)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (organization_id, payer_id, environment)
-			DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()`, orgID, payerID, env, enabled)
-		return err
-	}
+// SavePayerSetting turns a payer on or off and, when account is not empty,
+// records the answer about the platform account.
+func (s *Store) SavePayerSetting(ctx context.Context, orgID, payerID, env string, enabled bool, account string) error {
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO payer_settings (organization_id, payer_id, environment, enabled, credentials_sealed, credential_fields)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO payer_settings (organization_id, payer_id, environment, enabled, account)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 		ON CONFLICT (organization_id, payer_id, environment)
-		DO UPDATE SET enabled = EXCLUDED.enabled, credentials_sealed = EXCLUDED.credentials_sealed,
-		              credential_fields = EXCLUDED.credential_fields, checked_at = NULL, check_ok = NULL,
-		              check_message = NULL, updated_at = now()`, orgID, payerID, env, enabled, sealed, fields)
+		DO UPDATE SET enabled = EXCLUDED.enabled, account = coalesce(EXCLUDED.account, payer_settings.account),
+		              updated_at = now()`, orgID, payerID, env, enabled, account)
 	return err
 }
 
-// SealedCredentials returns a payer's sealed credentials (nil when none are set).
-func SealedCredentials(ctx context.Context, q Querier, orgID, payerID, env string) ([]byte, error) {
+// ConnectorAccount is an organisation's account on a platform (or on a
+// standalone payer's own interface). Its credentials are sealed and never
+// returned; Fields lists which are set.
+type ConnectorAccount struct {
+	Connector    string     `json:"connector"`
+	Environment  string     `json:"environment"`
+	Fields       []string   `json:"credential_fields"`
+	CheckedAt    *time.Time `json:"checked_at"`
+	CheckOK      *bool      `json:"check_ok"`
+	CheckMessage string     `json:"check_message,omitempty"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+func (s *Store) ListConnectorAccounts(ctx context.Context, orgID string) ([]ConnectorAccount, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT connector, environment, credential_fields, checked_at, check_ok, coalesce(check_message, ''), updated_at
+		FROM connector_accounts WHERE organization_id = $1 ORDER BY connector, environment`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ConnectorAccount, error) {
+		var a ConnectorAccount
+		return a, r.Scan(&a.Connector, &a.Environment, &a.Fields, &a.CheckedAt, &a.CheckOK, &a.CheckMessage, &a.UpdatedAt)
+	})
+}
+
+// SaveConnectorAccount replaces the sealed credentials and clears the last check.
+func (s *Store) SaveConnectorAccount(ctx context.Context, orgID, connectorKey, env string, sealed []byte, fields []string) error {
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO connector_accounts (organization_id, connector, environment, credentials_sealed, credential_fields)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (organization_id, connector, environment)
+		DO UPDATE SET credentials_sealed = EXCLUDED.credentials_sealed, credential_fields = EXCLUDED.credential_fields,
+		              checked_at = NULL, check_ok = NULL, check_message = NULL, updated_at = now()`,
+		orgID, connectorKey, env, sealed, fields)
+	return err
+}
+
+// SealedAccount returns the sealed credentials of an account (nil when none).
+func SealedAccount(ctx context.Context, q Querier, orgID, connectorKey, env string) ([]byte, error) {
 	var sealed []byte
 	err := q.QueryRow(ctx, `
-		SELECT credentials_sealed FROM payer_settings
-		WHERE organization_id = $1 AND payer_id = $2 AND environment = $3 AND enabled`,
-		orgID, payerID, env).Scan(&sealed)
+		SELECT credentials_sealed FROM connector_accounts
+		WHERE organization_id = $1 AND connector = $2 AND environment = $3`, orgID, connectorKey, env).Scan(&sealed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return sealed, err
 }
 
-func (s *Store) RecordPayerCheck(ctx context.Context, orgID, payerID, env string, ok bool, message string) error {
+func (s *Store) RecordAccountCheck(ctx context.Context, orgID, connectorKey, env string, ok bool, message string) error {
 	_, err := s.Pool.Exec(ctx, `
-		UPDATE payer_settings SET checked_at = now(), check_ok = $4, check_message = $5
-		WHERE organization_id = $1 AND payer_id = $2 AND environment = $3`, orgID, payerID, env, ok, message)
+		UPDATE connector_accounts SET checked_at = now(), check_ok = $4, check_message = $5
+		WHERE organization_id = $1 AND connector = $2 AND environment = $3`, orgID, connectorKey, env, ok, message)
 	return err
+}
+
+// ItemMapping is an organisation's own item code mapped to a standard item.
+type ItemMapping struct {
+	LocalCode   string    `json:"local_code"`
+	LocalName   string    `json:"local_name"`
+	ItemID      string    `json:"item_id"`
+	ConfirmedBy string    `json:"confirmed_by"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (s *Store) ListItemMappings(ctx context.Context, orgID string) ([]ItemMapping, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT local_code, local_name, item_id, confirmed_by, updated_at
+		FROM item_mappings WHERE organization_id = $1 ORDER BY local_code`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ItemMapping, error) {
+		var m ItemMapping
+		return m, r.Scan(&m.LocalCode, &m.LocalName, &m.ItemID, &m.ConfirmedBy, &m.UpdatedAt)
+	})
+}
+
+// SaveItemMappings upserts mappings in one transaction: all or none.
+func (s *Store) SaveItemMappings(ctx context.Context, orgID string, ms []ItemMapping) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for _, m := range ms {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO item_mappings (organization_id, local_code, local_name, item_id, confirmed_by)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (organization_id, local_code)
+			DO UPDATE SET local_name = EXCLUDED.local_name, item_id = EXCLUDED.item_id,
+			              confirmed_by = EXCLUDED.confirmed_by, updated_at = now()`,
+			orgID, m.LocalCode, m.LocalName, m.ItemID, m.ConfirmedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) DeleteItemMapping(ctx context.Context, orgID, localCode string) error {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM item_mappings WHERE organization_id = $1 AND local_code = $2`, orgID, localCode)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
+// MappedItems returns the standard item for each of the given own codes that
+// the organisation has mapped.
+func MappedItems(ctx context.Context, q Querier, orgID string, codes []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(codes) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT local_code, item_id FROM item_mappings WHERE organization_id = $1 AND local_code = ANY($2)`, orgID, codes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code, item string
+		if err := rows.Scan(&code, &item); err != nil {
+			return nil, err
+		}
+		out[code] = item
+	}
+	return out, rows.Err()
 }
 
 // ClaimSummary is one row of the console's claims list.

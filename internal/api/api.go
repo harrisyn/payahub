@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
-	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/engine"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
@@ -34,12 +34,12 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
-	mux.HandleFunc("GET /v1/payers", s.listPayers)
 	mux.Handle("POST /v1/claims", s.auth(s.createClaim))
 	mux.Handle("POST /v1/claims/validate", s.auth(s.validateClaim))
 	mux.Handle("GET /v1/claims/{id}", s.auth(s.getClaim))
 	mux.Handle("GET /v1/claims/{id}/events", s.auth(s.claimEvents))
 	mux.Handle("POST /v1/claims/{id}/submit", s.auth(s.submitClaim))
+	s.catalogRoutes(mux)
 	s.consoleRoutes(mux)
 	return mux
 }
@@ -99,10 +99,6 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) listPayers(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"data": connector.Manifests()})
-}
-
 // readInput decodes a claim request strictly (unknown fields rejected) and
 // returns the raw bytes' hash for idempotency checks.
 func readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bool) {
@@ -123,8 +119,8 @@ func readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bo
 		writeError(w, http.StatusUnprocessableEntity, "invalid_claim", "The claim has missing or invalid fields.", errs)
 		return nil, nil, false
 	}
-	if _, _, ok := connector.Lookup(in.PayerID); !ok {
-		writeError(w, http.StatusUnprocessableEntity, "unknown_payer", "No supported payer '"+in.PayerID+"'. See GET /v1/payers.", nil)
+	if _, ok := catalog.LookupPayer(in.PayerID); !ok {
+		writeError(w, http.StatusUnprocessableEntity, "unknown_payer", "No payer '"+in.PayerID+"' in the catalogue. See GET /v1/payers.", nil)
 		return nil, nil, false
 	}
 	sum := sha256.Sum256(raw)
@@ -162,7 +158,14 @@ func (s *Server) createClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org := orgFrom(r.Context())
-	c, replayed, err := s.Store.CreateClaim(r.Context(), newClaim(org, in, sha), r.Header.Get("Idempotency-Key"), sha)
+	c := newClaim(org, in, sha)
+	// Resolve lines now so the stored claim shows its standard items and
+	// payer codes; lines still unresolved are tried again at submit.
+	if _, err := queue.Prepare(r.Context(), s.Store.Pool, c); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	c, replayed, err := s.Store.CreateClaim(r.Context(), c, r.Header.Get("Idempotency-Key"), sha)
 	switch {
 	case errors.Is(err, store.ErrIdempotencyConflict):
 		writeError(w, http.StatusUnprocessableEntity, "idempotency_conflict",
@@ -184,7 +187,11 @@ func (s *Server) validateClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	org := orgFrom(r.Context())
 	c := newClaim(org, in, sha)
-	m, _, _ := connector.Lookup(c.PayerID)
+	m, err := queue.Prepare(r.Context(), s.Store.Pool, c)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	overrides, err := store.PayerOverrides(r.Context(), s.Store.Pool, org.ID, c.PayerID, org.Environment)
 	if err != nil {
 		s.internal(w, r, err)

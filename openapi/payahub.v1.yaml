@@ -4,6 +4,7 @@ info:
   version: 0.1.0
   description: |
     Send any claim, in any form, to any supported payer.
+    Payers and standard items are one shared catalogue; organisations map their own item codes to it once.
     Authenticate with `Authorization: Bearer <api key>`. Sandbox keys reach a simulated payer.
     Money is in minor units (pesewas, cents). Every write accepts an `Idempotency-Key`.
 
@@ -25,7 +26,7 @@ paths:
   /v1/payers:
     get:
       security: []
-      summary: Supported payers, their capabilities and the credentials each needs
+      summary: The shared payer catalogue. Each payer is standalone or reached through a platform.
       responses:
         "200":
           description: OK
@@ -35,6 +36,136 @@ paths:
                 type: object
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/Payer" } }
+  /v1/payers/{id}:
+    get:
+      security: []
+      summary: One payer from the catalogue
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Payer" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/connectors:
+    get:
+      security: []
+      summary: Platforms and payer interfaces, with the account fields an organisation enters for each
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Connector" } } } }
+  /v1/items:
+    get:
+      security: []
+      summary: The standard list of billable items. With q, the closest matches first.
+      parameters:
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/ItemKind" } }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Item" } } } }
+  /v1/items/{id}:
+    get:
+      security: []
+      summary: One standard item and each payer's code for it
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item: { $ref: "#/components/schemas/Item" }
+                  payer_codes:
+                    type: array
+                    items:
+                      type: object
+                      properties: { payer_id: { type: string }, code: { type: string }, description: { type: string } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/items/suggest:
+    post:
+      summary: Suggest standard items for the organisation's own items. Nothing is saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    properties: { code: { type: string }, name: { type: string }, kind: { $ref: "#/components/schemas/ItemKind" } }
+      responses:
+        "200":
+          description: Up to three suggestions per item, best first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        name: { type: string }
+                        suggestions:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              item: { $ref: "#/components/schemas/Item" }
+                              confidence: { type: number, minimum: 0, maximum: 1 }
+  /v1/item-mappings:
+    get:
+      summary: The organisation's own codes mapped to standard items
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/ItemMapping" } } } }
+    put:
+      summary: Save confirmed mappings, all or none. Repeating the request gives the same result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mappings]
+              properties:
+                mappings:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [local_code, item_id]
+                    properties: { local_code: { type: string }, local_name: { type: string }, item_id: { type: string } }
+      responses:
+        "200":
+          description: Saved; the full list
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/ItemMapping" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/item-mappings/{code}:
+    delete:
+      summary: Remove one mapping
+      parameters: [{ name: code, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/signup:
     post:
       security: []
@@ -114,7 +245,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        id: { enum: [account, profile, payers, first_claim, go_live] }
+                        id: { enum: [account, profile, payers, items, first_claim, go_live] }
                         done: { type: boolean }
   /v1/organization/profile:
     put:
@@ -192,7 +323,7 @@ paths:
   /v1/payer-settings:
     get:
       security: [{ session: [] }]
-      summary: Each insurer's setting per environment. Credential values are never returned, only which fields are set.
+      summary: The payers the organisation uses, per environment
       responses:
         "200":
           description: OK
@@ -202,7 +333,7 @@ paths:
   /v1/payer-settings/{payer}/{env}:
     put:
       security: [{ session: [] }]
-      summary: Turn an insurer on or off and, optionally, replace its credentials (sealed with AES-256-GCM)
+      summary: Turn a catalogue payer on or off, and say whether the organisation has an account on its platform
       parameters:
         - { name: payer, in: path, required: true, schema: { type: string } }
         - { name: env, in: path, required: true, schema: { enum: [sandbox, live] } }
@@ -214,19 +345,57 @@ paths:
               type: object
               properties:
                 enabled: { type: boolean }
+                account: { enum: [have, need], description: Omit to keep the earlier answer }
+      responses:
+        "200":
+          description: Saved; the full list
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PayerSetting" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/connector-accounts:
+    get:
+      security: [{ session: [] }]
+      summary: The organisation's accounts on platforms and payer interfaces. Credential values are never returned.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/ConnectorAccount" } } } }
+  /v1/connector-accounts/{connector}/{env}:
+    put:
+      security: [{ session: [] }]
+      summary: Save the organisation's account on a platform (sealed with AES-256-GCM). It serves every payer the platform carries.
+      parameters:
+        - { name: connector, in: path, required: true, schema: { type: string } }
+        - { name: env, in: path, required: true, schema: { enum: [sandbox, live] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
                 credentials:
                   type: object
                   additionalProperties: { type: string }
-                  description: Every required field of the payer's manifest. Omit to keep the sealed set.
+                  description: Every required field of the connector's credentials
       responses:
-        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PayerSetting" } } } }
+        "200":
+          description: Saved; the full list
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/ConnectorAccount" } } } }
+        "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
-  /v1/payer-settings/{payer}/{env}/check:
+  /v1/connector-accounts/{connector}/{env}/check:
     post:
       security: [{ session: [] }]
-      summary: Try the saved credentials against the insurer and record the result
+      summary: Try the saved account with a test member check against one of the payers it reaches, and record the result
       parameters:
-        - { name: payer, in: path, required: true, schema: { type: string } }
+        - { name: connector, in: path, required: true, schema: { type: string } }
         - { name: env, in: path, required: true, schema: { enum: [sandbox, live] } }
       responses:
         "200":
@@ -234,6 +403,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { ok: { type: boolean }, message: { type: string } } }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/claims:
     get:
       summary: List claims, newest first. An API key sees only its own environment.
@@ -394,8 +564,15 @@ components:
               id: { type: string }
               description: { type: string }
               category: { enum: [service, procedure, drug, consumable] }
-              code: { $ref: "#/components/schemas/Code" }
-              mapping: { $ref: "#/components/schemas/CodeMapping" }
+              code:
+                $ref: "#/components/schemas/Code"
+                description: |
+                  The organisation's own code (mapped with PUT /v1/item-mappings) or a standard item
+                  as {"system": "payahub", "value": "MED-0001"}.
+              item: { type: string, description: The standard item the line resolved to (set by Payahub) }
+              mapping:
+                $ref: "#/components/schemas/CodeMapping"
+                description: The payer's code. Filled in from the standard item; send it only to override.
               quantity: { type: integer, minimum: 1, default: 1 }
               unit_price: { type: integer, minimum: 0, description: Minor units }
               service_date: { type: string, format: date }
@@ -446,10 +623,65 @@ components:
         id: { type: string }
         name: { type: string }
         country: { type: string }
+        kind: { enum: [standalone, integrated], description: Integrated payers are reached through a platform }
+        connector:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            kind: { enum: [platform, direct] }
+            status: { enum: [available, porting] }
+        status: { enum: [available, connecting] }
+        member_otp_required: { type: boolean }
+        capabilities: { type: array, items: { type: string } }
+        coded_items: { type: integer, description: Standard items this payer has a code for }
+        notes: { type: string }
+    CredentialField:
+      type: object
+      properties: { name: { type: string }, label: { type: string }, secret: { type: boolean }, required: { type: boolean } }
+    Connector:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { enum: [platform, direct] }
+        country: { type: string }
         channel: { enum: [api, portal, email] }
         capabilities: { type: array, items: { type: string } }
         member_otp_required: { type: boolean }
-        credentials: { type: array, items: { type: object } }
+        credentials: { type: array, items: { $ref: "#/components/schemas/CredentialField" }, description: The organisation's account fields }
+        payer_fields: { type: array, items: { $ref: "#/components/schemas/CredentialField" }, description: Set per payer in the catalogue }
+        status: { enum: [available, porting] }
+    ConnectorAccount:
+      type: object
+      properties:
+        connector: { type: string }
+        environment: { enum: [sandbox, live] }
+        credential_fields: { type: array, items: { type: string }, description: Names of the fields that are set }
+        checked_at: { type: [string, "null"], format: date-time }
+        check_ok: { type: [boolean, "null"] }
+        check_message: { type: string }
+        updated_at: { type: string, format: date-time }
+    ItemKind: { enum: [service, lab, imaging, procedure, medication, consumable] }
+    Item:
+      type: object
+      properties:
+        id: { type: string, examples: [MED-0001] }
+        kind: { $ref: "#/components/schemas/ItemKind" }
+        name: { type: string }
+        generic: { type: string }
+        strength: { type: string }
+        form: { type: string }
+        synonyms: { type: array, items: { type: string } }
+        codes: { type: array, items: { $ref: "#/components/schemas/Code" }, description: Other standards, such as ATC }
+    ItemMapping:
+      type: object
+      properties:
+        local_code: { type: string }
+        local_name: { type: string }
+        item_id: { type: string }
+        confirmed_by: { type: string, description: The user who confirmed it, or api:<environment> }
+        updated_at: { type: string, format: date-time }
     Plan: { enum: [trial, flat, flat_volume, volume, enterprise, enterprise_requested] }
     Method: { enum: [rest, batch, documents, web_form] }
     Profile:
@@ -504,10 +736,7 @@ components:
         payer_id: { type: string }
         environment: { enum: [sandbox, live] }
         enabled: { type: boolean }
-        credential_fields: { type: array, items: { type: string }, description: Names of the fields that are set }
-        checked_at: { type: [string, "null"], format: date-time }
-        check_ok: { type: [boolean, "null"] }
-        check_message: { type: string }
+        account: { enum: [have, need], description: Whether the organisation has an account on the payer's platform }
         updated_at: { type: string, format: date-time }
     ClaimSummary:
       type: object

@@ -23,6 +23,7 @@ var manifest = func() connector.Manifest {
 	return connector.Manifest{
 		Key:     Key,
 		Name:    "Medserve",
+		Kind:    connector.KindPlatform,
 		Country: "GH",
 		Channel: connector.ChannelAPI,
 		Verbs: []connector.Verb{
@@ -34,7 +35,10 @@ var manifest = func() connector.Manifest {
 			{Name: "base_url", Label: "API base URL", Required: true},
 			{Name: "username", Label: "POS username", Required: true},
 			{Name: "password", Label: "POS password", Secret: true, Required: true},
-			{Name: "insurer_code", Label: "Insurer code", Required: false},
+		},
+		// Medserve's path segment for the insurer ("ghi" when unset).
+		PayerFields: []connector.CredentialField{
+			{Name: "insurer_code", Label: "Insurer code"},
 		},
 		Submission: sub,
 		Status:     connector.StatusPorting,

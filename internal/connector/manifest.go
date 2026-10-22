@@ -62,18 +62,34 @@ func DefaultSubmissionConfig() SubmissionConfig {
 	}
 }
 
-// Manifest describes a connector as data: what it can do and how its payer
-// wants claims built, so the engine picks a strategy without payer branches.
+// Kind says who a connector reaches. A platform (XCeli, Medserve, RX...)
+// carries claims for many payers, so one organisation account on it serves
+// every payer behind it; a direct connector is one payer's own interface.
+type Kind string
+
+const (
+	KindPlatform Kind = "platform"
+	KindDirect   Kind = "direct"
+)
+
+// Manifest describes a connector as data: what it can do and how its payers
+// want claims built, so the engine picks a strategy without payer branches.
 type Manifest struct {
-	Key               string            `json:"id"`
-	Name              string            `json:"name"`
-	Country           string            `json:"country"`
-	Channel           Channel           `json:"channel"`
-	Verbs             []Verb            `json:"capabilities"`
-	MemberOTPRequired bool              `json:"member_otp_required"`
-	Credentials       []CredentialField `json:"credentials"`
-	Submission        SubmissionConfig  `json:"submission"`
-	Notes             string            `json:"notes,omitempty"`
+	Key               string           `json:"id"`
+	Name              string           `json:"name"`
+	Kind              Kind             `json:"kind"`
+	Country           string           `json:"country"`
+	Channel           Channel          `json:"channel"`
+	Verbs             []Verb           `json:"capabilities"`
+	MemberOTPRequired bool             `json:"member_otp_required"`
+	Submission        SubmissionConfig `json:"submission"`
+	Notes             string           `json:"notes,omitempty"`
+	// Credentials are the organisation's account on the connector, entered
+	// once and used for every payer reached through it.
+	Credentials []CredentialField `json:"credentials"`
+	// PayerFields are what the payer catalogue records for each payer on this
+	// connector (its insurer code or API server), defined once for everyone.
+	PayerFields []CredentialField `json:"payer_fields"`
 	// Status is "available" once the adapter is ported and tested, "porting"
 	// while only the manifest exists. The console shows it next to the payer.
 	Status string `json:"status"`

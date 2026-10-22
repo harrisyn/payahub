@@ -3,7 +3,7 @@ import { ProfileForm, Submit } from "@/components/forms";
 import { api } from "@/lib/api";
 import { methodName } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
-import type { Manifest, Method } from "@/lib/types";
+import type { Method, Payer } from "@/lib/types";
 
 export const metadata = { title: "How you bill" };
 
@@ -16,7 +16,7 @@ const methodDetail: Record<Method, string> = {
 
 export default async function Setup() {
   const { organization: org, recommendation } = await requireOrg();
-  const payers = await api<{ data: Manifest[] }>("/v1/payers");
+  const payers = await api<{ data: Payer[] }>("/v1/payers");
   const list = payers.ok ? payers.data.data : [];
   const chosen = org.profile?.method ?? recommendation?.method;
 

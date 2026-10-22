@@ -12,8 +12,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/onboarding"
+	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
 )
@@ -34,7 +36,9 @@ func (s *Server) consoleRoutes(mux *http.ServeMux) {
 	mux.Handle("DELETE /v1/api-keys/{id}", s.session(s.revokeKey))
 	mux.Handle("GET /v1/payer-settings", s.session(s.listPayerSettings))
 	mux.Handle("PUT /v1/payer-settings/{payer}/{env}", s.session(s.putPayerSetting))
-	mux.Handle("POST /v1/payer-settings/{payer}/{env}/check", s.session(s.checkPayer))
+	mux.Handle("GET /v1/connector-accounts", s.session(s.listAccounts))
+	mux.Handle("PUT /v1/connector-accounts/{connector}/{env}", s.session(s.putAccount))
+	mux.Handle("POST /v1/connector-accounts/{connector}/{env}/check", s.session(s.checkAccount))
 	mux.Handle("GET /v1/claims", s.auth(s.listClaims))
 }
 
@@ -160,6 +164,11 @@ func (s *Server) getOrganization(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	mappings, err := s.Store.ListItemMappings(ctx, org.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	out := map[string]any{"organization": o, "usage": usage}
 	if o.Profile != nil {
 		out["recommendation"] = onboarding.Recommend(*o.Profile)
@@ -168,6 +177,7 @@ func (s *Server) getOrganization(w http.ResponseWriter, r *http.Request) {
 		{ID: "account", Done: true},
 		{ID: "profile", Done: o.Profile != nil},
 		{ID: "payers", Done: slices.ContainsFunc(settings, func(p store.PayerSetting) bool { return p.Enabled })},
+		{ID: "items", Done: len(mappings) > 0},
 		{ID: "first_claim", Done: acked},
 		{ID: "go_live", Done: o.Plan != onboarding.PlanTrial},
 	}
@@ -184,8 +194,8 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, id := range p.Payers {
-		if _, _, ok := connector.Lookup(id); !ok {
-			writeError(w, http.StatusUnprocessableEntity, "unknown_payer", "No supported payer '"+id+"'.", nil)
+		if _, ok := catalog.LookupPayer(id); !ok {
+			writeError(w, http.StatusUnprocessableEntity, "unknown_payer", "No payer '"+id+"' in the catalogue.", nil)
 			return
 		}
 	}
@@ -274,95 +284,148 @@ func (s *Server) listPayerSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": settings})
 }
 
-// payerTarget reads and checks the {payer} and {env} path values.
-func payerTarget(w http.ResponseWriter, r *http.Request) (connector.Manifest, string, bool) {
-	m, _, ok := connector.Lookup(r.PathValue("payer"))
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown_payer", "No supported payer '"+r.PathValue("payer")+"'.", nil)
-		return m, "", false
-	}
-	env := r.PathValue("env")
+func validEnv(w http.ResponseWriter, env string) bool {
 	if env != "sandbox" && env != "live" {
 		writeError(w, http.StatusNotFound, "invalid_environment", "Environment is sandbox or live.", nil)
-		return m, "", false
+		return false
 	}
-	return m, env, true
+	return true
 }
 
 func (s *Server) putPayerSetting(w http.ResponseWriter, r *http.Request) {
-	m, env, ok := payerTarget(w, r)
+	p, ok := catalog.LookupPayer(r.PathValue("payer"))
 	if !ok {
+		writeError(w, http.StatusNotFound, "unknown_payer", "No payer '"+r.PathValue("payer")+"' in the catalogue.", nil)
+		return
+	}
+	env := r.PathValue("env")
+	if !validEnv(w, env) {
 		return
 	}
 	var in struct {
-		Enabled     bool              `json:"enabled"`
-		Credentials map[string]string `json:"credentials"`
+		Enabled bool   `json:"enabled"`
+		Account string `json:"account"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	org := orgFrom(r.Context())
-	var sealed []byte
-	var fields []string
-	if in.Credentials != nil {
-		known := map[string]bool{}
-		for _, f := range m.Credentials {
-			known[f.Name] = true
-		}
-		for name, v := range in.Credentials {
-			if !known[name] {
-				writeError(w, http.StatusUnprocessableEntity, "unknown_credential", m.Name+" has no credential '"+name+"'.", nil)
-				return
-			}
-			if v != "" {
-				fields = append(fields, name)
-			}
-		}
-		if err := connector.CheckCredentials(m, in.Credentials); err != nil {
-			writeError(w, http.StatusUnprocessableEntity, "missing_credentials", connector.AsError(err).Message, nil)
-			return
-		}
-		slices.Sort(fields)
-		var err error
-		if sealed, err = s.Vault.Seal(in.Credentials, vault.Owner(org.ID, m.Key, env)); err != nil {
-			s.internal(w, r, err)
-			return
-		}
+	if in.Account != "" && in.Account != "have" && in.Account != "need" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_account", "account is have or need.", nil)
+		return
 	}
-	if err := s.Store.SavePayerSetting(r.Context(), org.ID, m.Key, env, in.Enabled, sealed, fields); err != nil {
+	if err := s.Store.SavePayerSetting(r.Context(), orgFrom(r.Context()).ID, p.ID, env, in.Enabled, in.Account); err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	s.listPayerSettings(w, r)
 }
 
-// checkPayer tries the payer's connection with the saved credentials by
-// verifying a test member, and records the result.
-func (s *Server) checkPayer(w http.ResponseWriter, r *http.Request) {
-	m, env, ok := payerTarget(w, r)
+func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
+	accounts, err := s.Store.ListConnectorAccounts(r.Context(), orgFrom(r.Context()).ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": accounts})
+}
+
+// accountTarget reads and checks the {connector} and {env} path values.
+func accountTarget(w http.ResponseWriter, r *http.Request) (connector.Manifest, string, bool) {
+	m, _, ok := connector.Lookup(r.PathValue("connector"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown_connector", "No platform or payer interface '"+r.PathValue("connector")+"'.", nil)
+		return m, "", false
+	}
+	env := r.PathValue("env")
+	return m, env, validEnv(w, env)
+}
+
+// putAccount saves the organisation's credentials on a platform (or a
+// standalone payer's interface). They are sealed at once and never returned.
+func (s *Server) putAccount(w http.ResponseWriter, r *http.Request) {
+	m, env, ok := accountTarget(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Credentials map[string]string `json:"credentials"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Credentials == nil {
+		in.Credentials = map[string]string{}
+	}
+	known := map[string]bool{}
+	for _, f := range m.Credentials {
+		known[f.Name] = true
+	}
+	var fields []string
+	for name, v := range in.Credentials {
+		if !known[name] {
+			writeError(w, http.StatusUnprocessableEntity, "unknown_credential", m.Name+" has no credential '"+name+"'.", nil)
+			return
+		}
+		if v != "" {
+			fields = append(fields, name)
+		}
+	}
+	if err := connector.CheckCredentials(m, in.Credentials); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "missing_credentials", connector.AsError(err).Message, nil)
+		return
+	}
+	slices.Sort(fields)
+	org := orgFrom(r.Context())
+	sealed, err := s.Vault.Seal(in.Credentials, vault.Owner(org.ID, m.Key, env))
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if err := s.Store.SaveConnectorAccount(r.Context(), org.ID, m.Key, env, sealed, fields); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.listAccounts(w, r)
+}
+
+// checkAccount tries the saved account by verifying a test member with one
+// of the payers it reaches (one the organisation uses, if any), and records
+// the result.
+func (s *Server) checkAccount(w http.ResponseWriter, r *http.Request) {
+	m, env, ok := accountTarget(w, r)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 	org := orgFrom(ctx)
-	creds := map[string]string{}
-	if m.Key != "sandbox" {
-		sealed, err := store.SealedCredentials(ctx, s.Store.Pool, org.ID, m.Key, env)
+	if len(m.Credentials) > 0 {
+		sealed, err := store.SealedAccount(ctx, s.Store.Pool, org.ID, m.Key, env)
 		if err != nil {
 			s.internal(w, r, err)
 			return
 		}
 		if sealed == nil {
-			writeError(w, http.StatusUnprocessableEntity, "no_credentials", "Save "+m.Name+" credentials first.", nil)
-			return
-		}
-		if creds, err = s.Vault.Open(sealed, vault.Owner(org.ID, m.Key, env)); err != nil {
-			s.internal(w, r, err)
+			writeError(w, http.StatusUnprocessableEntity, "no_credentials", "Save your "+m.Name+" account first.", nil)
 			return
 		}
 	}
-	okCheck, message := true, "Connected. "+m.Name+" answered a test member check."
-	conn, err := connector.New(m.Key, creds)
+	payers := catalog.PayersOn(m.Key)
+	if len(payers) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "no_payers", "No payer in the catalogue is reached through "+m.Name+" yet.", nil)
+		return
+	}
+	target := payers[0]
+	if settings, err := s.Store.ListPayerSettings(ctx, org.ID); err == nil {
+		for _, p := range payers {
+			if slices.ContainsFunc(settings, func(ps store.PayerSetting) bool { return ps.PayerID == p.ID && ps.Enabled }) {
+				target = p
+				break
+			}
+		}
+	}
+
+	okCheck, message := true, "Connected. "+m.Name+" answered a test member check for "+target.Name+"."
+	conn, err := queue.OpenAccount(ctx, s.Store.Pool, s.Vault, org.ID, target, env)
 	if err == nil {
 		checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		_, err = conn.VerifyMember(checkCtx, "PAYAHUB-CHECK", "")
@@ -370,18 +433,20 @@ func (s *Server) checkPayer(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		e := connector.AsError(err)
-		switch e.Code {
-		case connector.NotSupported:
-			okCheck, message = false, "Saved. "+m.Name+" is still being connected on our side, so we will check these credentials when it goes live."
-		case connector.MemberNotFound:
-			// The payer answered, so the credentials work; the test member simply does not exist.
+		switch {
+		case m.Status != connector.StatusAvailable || e.Code == connector.NotSupported:
+			okCheck, message = false, "Saved. "+m.Name+" is still being connected on our side, so we will check this account when it goes live."
+		case e.Code == connector.MemberNotFound:
+			// The payer answered, so the account works; the test member simply does not exist.
 		default:
 			okCheck, message = false, e.Message
 		}
 	}
-	if err := s.Store.RecordPayerCheck(ctx, org.ID, m.Key, env, okCheck, message); err != nil {
-		s.internal(w, r, err)
-		return
+	if len(m.Credentials) > 0 {
+		if err := s.Store.RecordAccountCheck(ctx, org.ID, m.Key, env, okCheck, message); err != nil {
+			s.internal(w, r, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": okCheck, "message": message})
 }

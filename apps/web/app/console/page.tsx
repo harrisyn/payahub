@@ -7,12 +7,13 @@ import { KeyBanner } from "@/components/key-banner";
 import { api } from "@/lib/api";
 import { daysLeft, methodName } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
-import type { ClaimSummary, Manifest } from "@/lib/types";
+import type { ClaimSummary, Payer } from "@/lib/types";
 
 const stepCopy = {
   account: { title: "Create your account", detail: "Done. Your sandbox key was shown once at sign-up.", href: "/console/developers", cta: "Keys" },
   profile: { title: "Tell us how you bill", detail: "Four questions, then we recommend how to connect.", href: "/console/setup", cta: "Answer" },
-  payers: { title: "Choose your insurers", detail: "Turn on the insurers you bill and add their credentials.", href: "/console/insurers", cta: "Choose" },
+  payers: { title: "Choose your insurers", detail: "Pick them from our list and add your account on the platform each one uses.", href: "/console/insurers", cta: "Choose" },
+  items: { title: "Map your services and medicines", detail: "Match your own codes to our standard list once; every insurer's codes follow.", href: "/console/items", cta: "Map" },
   first_claim: { title: "Send a first claim", detail: "Send a sandbox claim and watch the insurer acknowledge it.", href: "/console/claims", cta: "Send" },
   go_live: { title: "Choose a plan and go live", detail: "Pick how to pay, make a live key, and send real claims.", href: "/console/plan", cta: "Choose" },
 } as const;
@@ -22,7 +23,7 @@ export default async function Overview() {
   const { organization: org, usage, onboarding, recommendation } = view;
   const [claims, payers] = await Promise.all([
     api<{ data: ClaimSummary[] }>("/v1/claims?limit=5"),
-    api<{ data: Manifest[] }>("/v1/payers"),
+    api<{ data: Payer[] }>("/v1/payers"),
   ]);
   const rows = claims.ok ? claims.data.data : [];
   const payerNames = Object.fromEntries((payers.ok ? payers.data.data : []).map((m) => [m.id, m.name]));
@@ -38,7 +39,7 @@ export default async function Overview() {
           <p className="app-finding">
             {next
               ? `${done} of ${onboarding.length} steps done. Next: ${stepCopy[next.id].title.toLowerCase()}.`
-              : "All five steps done. Live claims now go through your plan."}
+              : `All ${onboarding.length} steps done. Live claims now go through your plan.`}
           </p>
         </div>
         {next && (

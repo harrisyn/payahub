@@ -5,7 +5,7 @@ import { ClaimsTable } from "@/components/claim-row";
 import { Submit } from "@/components/forms";
 import { api } from "@/lib/api";
 import { requireOrg } from "@/lib/session";
-import type { ClaimSummary, Manifest } from "@/lib/types";
+import type { ClaimSummary, Payer } from "@/lib/types";
 
 export const metadata = { title: "Claims" };
 
@@ -23,7 +23,7 @@ export default async function Claims({ searchParams }: { searchParams: Promise<{
   if (before) q.set("before", before);
   const [claims, payers] = await Promise.all([
     api<{ data: ClaimSummary[]; next_before?: string }>(`/v1/claims?${q}`),
-    api<{ data: Manifest[] }>("/v1/payers"),
+    api<{ data: Payer[] }>("/v1/payers"),
   ]);
   const rows = claims.ok ? claims.data.data : [];
   const payerNames = Object.fromEntries((payers.ok ? payers.data.data : []).map((m) => [m.id, m.name]));

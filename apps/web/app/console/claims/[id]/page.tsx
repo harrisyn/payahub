@@ -20,7 +20,15 @@ type Claim = {
   member: { member_number: string };
   provider: { name: string };
   encounter: { type: string; start_date: string };
-  lines: { id: string; description: string; quantity: number; unit_price: number }[];
+  lines: {
+    id: string;
+    description: string;
+    quantity: number;
+    unit_price: number;
+    code?: { system: string; value: string };
+    item?: string;
+    mapping?: { target?: { value: string } };
+  }[];
   diagnoses: { code: { system: string; value: string }; role: string }[];
   created_at: string;
 };
@@ -128,7 +136,18 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
             <tbody>
               {claim.lines.map((l) => (
                 <tr key={l.id}>
-                  <td>{l.description}</td>
+                  <td>
+                    {l.description}
+                    <span className="app-muted app-block">
+                      {[
+                        l.code && l.code.system !== "payahub" ? `Your code ${l.code.value}` : null,
+                        l.item ? `standard ${l.item}` : null,
+                        l.mapping?.target ? `insurer code ${l.mapping.target.value}` : "no insurer code yet",
+                      ]
+                        .filter(Boolean)
+                        .join(" → ")}
+                    </span>
+                  </td>
                   <td className="num">{l.quantity}</td>
                   <td className="num">{money(l.unit_price * l.quantity, claim.currency)}</td>
                 </tr>

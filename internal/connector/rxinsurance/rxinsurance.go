@@ -18,6 +18,7 @@ const Key = "rx_insurance"
 var manifest = connector.Manifest{
 	Key:     Key,
 	Name:    "RX Insurance",
+	Kind:    connector.KindPlatform,
 	Country: "GH",
 	Channel: connector.ChannelAPI,
 	Verbs: []connector.Verb{
@@ -32,6 +33,9 @@ var manifest = connector.Manifest{
 		{Name: "password", Label: "Password", Secret: true, Required: true},
 		{Name: "provider_id", Label: "Provider ID", Required: true},
 		{Name: "user_id", Label: "User ID", Required: true},
+	},
+	// Sent as INSCOMPANYCODE on every call.
+	PayerFields: []connector.CredentialField{
 		{Name: "ins_company_code", Label: "Insurance company code", Required: true},
 	},
 	Submission: connector.DefaultSubmissionConfig(),

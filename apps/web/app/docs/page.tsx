@@ -16,7 +16,14 @@ const endpoints = [
   { m: "GET", p: "/v1/claims/{id}", d: "Fetch one claim." },
   { m: "GET", p: "/v1/claims/{id}/events", d: "The claim's audit trail: every state change and attempt." },
   { m: "POST", p: "/v1/claims/{id}/submit", d: "Check and queue the claim for its insurer. Answers 202 at once; the outcome lands on the claim." },
-  { m: "GET", p: "/v1/payers", d: "Supported insurers, what each supports and the credentials each needs." },
+  { m: "GET", p: "/v1/payers", d: "The shared list of insurers: standalone or behind a platform, and whether each is live." },
+  { m: "GET", p: "/v1/connectors", d: "The platforms and insurer interfaces, with the account fields each needs." },
+  { m: "GET", p: "/v1/items", d: "The standard list of services, lab tests, imaging, procedures, medicines and consumables. Filter with kind or q." },
+  { m: "GET", p: "/v1/items/{id}", d: "One standard item and each insurer's code for it." },
+  { m: "POST", p: "/v1/items/suggest", d: "Suggest standard items for your own items (code and name), with a confidence for each." },
+  { m: "GET", p: "/v1/item-mappings", d: "Your codes mapped to standard items." },
+  { m: "PUT", p: "/v1/item-mappings", d: "Save up to 500 mappings at once, all or none. Safe to repeat." },
+  { m: "DELETE", p: "/v1/item-mappings/{code}", d: "Remove one mapping." },
   { m: "GET", p: "/v1/health", d: "Service health." },
 ];
 
@@ -70,6 +77,8 @@ export default function Docs() {
           <a href="#quick-start">Quick start</a>
           <a href="#auth">Authentication</a>
           <a href="#idempotency">Idempotency</a>
+          <a href="#payers">Insurers and platforms</a>
+          <a href="#items">Standard items</a>
           <a href="#endpoints">Endpoints</a>
           <a href="#states">Claim states</a>
           <a href="#errors">Errors</a>
@@ -96,7 +105,8 @@ export default function Docs() {
     "member": { "member_number": "M-1001" },
     "provider": { "name": "Ridge Clinic" },
     "encounter": { "start_date": "2026-10-20" },
-    "lines": [{ "description": "Consultation", "unit_price": 15000 }],
+    "lines": [{ "description": "Consultation", "unit_price": 15000,
+                "code": { "system": "payahub", "value": "SRV-0001" } }],
     "diagnoses": [{ "code": { "system": "icd-10", "value": "B54" }, "role": "primary" }]
   }'
 
@@ -121,6 +131,34 @@ curl -X POST https://api.payahub.example/v1/claims/clm_…/submit \\
             Every write takes an <code>Idempotency-Key</code>. Use something your system already has, such as the visit
             or invoice id. A repeat with the same body returns the first result; the same key with a different body is
             refused. Retrying a request after a timeout is always safe.
+          </p>
+
+          <h2 id="payers">Insurers and platforms</h2>
+          <p>
+            Insurers are one shared list, set up once by us for every clinic. Some are reached directly; most sit behind
+            a platform such as XCeli, Medserve or RX, which carries claims for several insurers. Send{" "}
+            <code>payer_id</code> from <code>GET /v1/payers</code>. For an insurer behind a platform you add your account
+            on that platform once, in the console, and it serves every insurer the platform carries.
+          </p>
+
+          <h2 id="items">Standard items and your codes</h2>
+          <p>
+            Every line resolves to a standard item, and the standard item to the insurer&apos;s own code. Send a line
+            either with a standard code, <code>{`{"system": "payahub", "value": "SRV-0001"}`}</code>, or with your own
+            code once you have mapped it (<code>PUT /v1/item-mappings</code> or the console). A line that already
+            carries the insurer&apos;s code in <code>mapping.target</code> is sent as it is.
+          </p>
+          <pre>
+            <code>{`"lines": [
+  { "description": "OPD consultation", "unit_price": 15000,
+    "code": { "system": "local", "value": "CONS" } },
+  { "description": "Artemether-lumefantrine", "unit_price": 3000,
+    "code": { "system": "payahub", "value": "MED-0003" } }
+]`}</code>
+          </pre>
+          <p>
+            The claim comes back with <code>item</code> and <code>mapping</code> filled in on each line it could resolve.
+            A line it could not resolve stops the claim at submit with an issue saying which code to map.
           </p>
 
           <h2 id="endpoints">Endpoints</h2>

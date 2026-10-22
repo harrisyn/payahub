@@ -1,6 +1,9 @@
 // Package sandbox is a deterministic in-process payer for trials, docs and
 // tests. Every sandbox API key reaches it, so a first claim can go end to end
-// before any real payer credentials exist. The member number picks the path:
+// before any real payer credentials exist. It registers twice: as a payer's
+// own (direct) interface, and as Sandbox Exchange, a platform that carries
+// claims for several sandbox payers, so onboarding can show both kinds.
+// The member number picks the path:
 //
 //	NOTFOUND...   member_not_found
 //	OTP...        verification needs OTP 123456
@@ -23,13 +26,15 @@ import (
 )
 
 const (
-	Key = "sandbox"
-	OTP = "123456"
+	Key         = "sandbox"
+	ExchangeKey = "sandbox_exchange"
+	OTP         = "123456"
 )
 
 var manifest = connector.Manifest{
 	Key:     Key,
 	Name:    "Payahub Sandbox",
+	Kind:    connector.KindDirect,
 	Country: "ZZ",
 	Channel: connector.ChannelAPI,
 	Verbs: []connector.Verb{
@@ -56,15 +61,38 @@ type record struct {
 	diagnoses []string
 }
 
-type Sandbox struct{ connector.Unsupported }
+// exchange is the same simulated payer behind a platform: an organisation
+// signs in to it once, and each payer on it is told apart by its code.
+var exchange = func() connector.Manifest {
+	m := manifest
+	m.Key, m.Name, m.Kind = ExchangeKey, "Sandbox Exchange", connector.KindPlatform
+	m.Notes = "Simulated platform. Any username and password work."
+	m.Credentials = []connector.CredentialField{
+		{Name: "username", Label: "Exchange username", Required: true},
+		{Name: "password", Label: "Exchange password", Secret: true, Required: true},
+	}
+	m.PayerFields = []connector.CredentialField{{Name: "payer_code", Label: "Payer code on the exchange", Required: true}}
+	return m
+}()
 
-func New(map[string]string) (connector.Connector, error) {
-	return Sandbox{connector.Unsupported{Name: manifest.Name}}, nil
+type Sandbox struct {
+	connector.Unsupported
+	m connector.Manifest
 }
 
-func init() { connector.Register(manifest, New) }
+// New builds the direct sandbox payer; every sandbox claim is sent to it.
+func New(connector.Account) (connector.Connector, error) {
+	return Sandbox{connector.Unsupported{Name: manifest.Name}, manifest}, nil
+}
 
-func (Sandbox) Manifest() connector.Manifest { return manifest }
+func init() {
+	connector.Register(manifest, New)
+	connector.Register(exchange, func(connector.Account) (connector.Connector, error) {
+		return Sandbox{connector.Unsupported{Name: exchange.Name}, exchange}, nil
+	})
+}
+
+func (s Sandbox) Manifest() connector.Manifest { return s.m }
 
 func ClaimNumber(claimID string) string {
 	sum := sha256.Sum256([]byte(claimID))

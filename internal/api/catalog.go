@@ -1,0 +1,213 @@
+package api
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/harrisyn/payahub/internal/catalog"
+	"github.com/harrisyn/payahub/internal/connector"
+	"github.com/harrisyn/payahub/internal/store"
+)
+
+// Catalogue routes: the shared payers and standard items are public reference
+// data; an organisation's mappings of its own codes need its key or session.
+func (s *Server) catalogRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/payers", s.listPayers)
+	mux.HandleFunc("GET /v1/payers/{id}", s.getPayer)
+	mux.HandleFunc("GET /v1/connectors", s.listConnectors)
+	mux.HandleFunc("GET /v1/items", s.listItems)
+	mux.HandleFunc("GET /v1/items/{id}", s.getItem)
+	mux.Handle("POST /v1/items/suggest", s.auth(s.suggestItems))
+	mux.Handle("GET /v1/item-mappings", s.auth(s.listItemMappings))
+	mux.Handle("PUT /v1/item-mappings", s.auth(s.putItemMappings))
+	mux.Handle("DELETE /v1/item-mappings/{code}", s.auth(s.deleteItemMapping))
+}
+
+type connectorRef struct {
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Kind   connector.Kind `json:"kind"`
+	Status string         `json:"status"`
+}
+
+type payerView struct {
+	ID                string           `json:"id"`
+	Name              string           `json:"name"`
+	Country           string           `json:"country"`
+	Kind              string           `json:"kind"` // standalone | integrated
+	Connector         connectorRef     `json:"connector"`
+	Status            string           `json:"status"` // available | connecting
+	MemberOTPRequired bool             `json:"member_otp_required"`
+	Capabilities      []connector.Verb `json:"capabilities"`
+	CodedItems        int              `json:"coded_items"`
+	Notes             string           `json:"notes,omitempty"`
+}
+
+func viewPayer(p catalog.Payer) payerView {
+	m, _, _ := connector.Lookup(p.Connector)
+	status := "connecting"
+	if p.Ready() {
+		status = connector.StatusAvailable
+	}
+	return payerView{
+		ID: p.ID, Name: p.Name, Country: p.Country, Kind: p.Kind(),
+		Connector: connectorRef{ID: m.Key, Name: m.Name, Kind: m.Kind, Status: m.Status},
+		Status:    status, MemberOTPRequired: m.MemberOTPRequired, Capabilities: m.Verbs,
+		CodedItems: catalog.CodedItems(p.ID), Notes: p.Notes,
+	}
+}
+
+func (s *Server) listPayers(w http.ResponseWriter, _ *http.Request) {
+	out := []payerView{}
+	for _, p := range catalog.Payers() {
+		out = append(out, viewPayer(p))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (s *Server) getPayer(w http.ResponseWriter, r *http.Request) {
+	p, ok := catalog.LookupPayer(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown_payer", "No payer '"+r.PathValue("id")+"' in the catalogue.", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, viewPayer(p))
+}
+
+// listConnectors lists the platforms and payer interfaces, with the account
+// fields an organisation fills in for each.
+func (s *Server) listConnectors(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": connector.Manifests()})
+}
+
+func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
+	kind := catalog.ItemKind(r.URL.Query().Get("kind"))
+	items := []catalog.Item{}
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		for _, sg := range catalog.Suggest(q, kind, 25) {
+			items = append(items, sg.Item)
+		}
+	} else {
+		items = append(items, catalog.Items(kind)...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
+	it, ok := catalog.LookupItem(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown_item", "No standard item '"+r.PathValue("id")+"'.", nil)
+		return
+	}
+	type payerCode struct {
+		PayerID string `json:"payer_id"`
+		catalog.PayerCode
+	}
+	codes := []payerCode{}
+	for _, p := range catalog.Payers() {
+		if pc, ok := catalog.CodeFor(p.ID, it.ID); ok {
+			codes = append(codes, payerCode{p.ID, pc})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": it, "payer_codes": codes})
+}
+
+type ownItem struct {
+	Code string           `json:"code"`
+	Name string           `json:"name"`
+	Kind catalog.ItemKind `json:"kind,omitempty"`
+}
+
+// suggestItems proposes standard items for the organisation's own items, for
+// a person (or the organisation's system) to confirm with PUT /v1/item-mappings.
+func (s *Server) suggestItems(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Items []ownItem `json:"items"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Items) == 0 || len(in.Items) > 500 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_items", "Send between 1 and 500 items.", nil)
+		return
+	}
+	type result struct {
+		ownItem
+		Suggestions []catalog.Suggestion `json:"suggestions"`
+	}
+	out := make([]result, 0, len(in.Items))
+	for _, it := range in.Items {
+		out = append(out, result{it, catalog.Suggest(it.Name, it.Kind, 3)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (s *Server) listItemMappings(w http.ResponseWriter, r *http.Request) {
+	ms, err := s.Store.ListItemMappings(r.Context(), orgFrom(r.Context()).ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": ms})
+}
+
+// putItemMappings saves confirmed mappings, all or none. Repeating a request
+// gives the same result, so it is safe to retry.
+func (s *Server) putItemMappings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Mappings []struct {
+			LocalCode string `json:"local_code"`
+			LocalName string `json:"local_name"`
+			ItemID    string `json:"item_id"`
+		} `json:"mappings"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Mappings) == 0 || len(in.Mappings) > 500 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_mappings", "Send between 1 and 500 mappings.", nil)
+		return
+	}
+	org := orgFrom(r.Context())
+	by := "api:" + org.Environment
+	if org.Session {
+		by = org.UserID
+	}
+	problems := map[string]string{}
+	ms := make([]store.ItemMapping, 0, len(in.Mappings))
+	for _, m := range in.Mappings {
+		code := strings.TrimSpace(m.LocalCode)
+		if code == "" {
+			problems["local_code"] = "Every mapping needs your own code."
+			continue
+		}
+		if _, ok := catalog.LookupItem(m.ItemID); !ok {
+			problems[code] = "No standard item '" + m.ItemID + "'."
+			continue
+		}
+		ms = append(ms, store.ItemMapping{LocalCode: code, LocalName: strings.TrimSpace(m.LocalName), ItemID: m.ItemID, ConfirmedBy: by})
+	}
+	if len(problems) > 0 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_mappings", "Some mappings need fixing.", problems)
+		return
+	}
+	if err := s.Store.SaveItemMappings(r.Context(), org.ID, ms); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.listItemMappings(w, r)
+}
+
+func (s *Server) deleteItemMapping(w http.ResponseWriter, r *http.Request) {
+	err := s.Store.DeleteItemMapping(r.Context(), orgFrom(r.Context()).ID, r.PathValue("code"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "mapping_not_found", "No mapping for '"+r.PathValue("code")+"'.", nil)
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

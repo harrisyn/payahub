@@ -23,7 +23,11 @@ const stages = [
 const faqs = [
   {
     q: "Which insurers can we send to?",
-    a: "Our first connectors are ported from five integrations already working in Ghanaian clinics: XCeli, Medserve, SmartClaims, RX Insurance and ClaimIQ, and the insurers behind them. Your console shows each one's status before you rely on it.",
+    a: "Pick yours from one shared list. Most insurers sit behind a platform (XCeli, Medserve, SmartClaims, RX Insurance or ClaimIQ, ported from integrations already working in Ghanaian clinics); you add your account on that platform once and it covers every insurer it carries. Your console shows each one's status before you rely on it.",
+  },
+  {
+    q: "Do we retype our price list for each insurer?",
+    a: "No. Map your own codes for services and medicines to our standard list once, with suggestions to confirm. Each insurer's own codes follow from the standard item, so one claim line reaches every insurer correctly coded.",
   },
   {
     q: "What counts as a claim on our bill?",
@@ -299,7 +303,7 @@ export default function Home() {
             <table className="payers__table">
               <thead>
                 <tr>
-                  <th scope="col">Connector</th>
+                  <th scope="col">Platform</th>
                   <th scope="col">Channel</th>
                   <th scope="col">Member code</th>
                   <th scope="col">Status</th>

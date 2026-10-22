@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { api, SESSION_COOKIE } from "@/lib/api";
-import type { APIKey, Method, Profile } from "@/lib/types";
+import type { APIKey, Method, Profile, Suggestion } from "@/lib/types";
 
 export type FormState = { error?: string; fields?: Record<string, string>; ok?: string };
 
@@ -111,24 +111,19 @@ export async function chooseMethod(form: FormData) {
   revalidatePath("/console", "layout");
 }
 
-export async function savePayer(_: FormState, form: FormData): Promise<FormState> {
+// savePayerUse turns a catalogue payer on or off for one environment and
+// records whether the organisation has an account on its platform.
+export async function savePayerUse(_: FormState, form: FormData): Promise<FormState> {
   const payer = text(form, "payer");
   const env = text(form, "environment");
-  const credentials: Record<string, string> = {};
-  let any = false;
-  for (const [k, v] of form.entries()) {
-    if (k.startsWith("cred_")) {
-      credentials[k.slice(5)] = String(v);
-      if (String(v) !== "") any = true;
-    }
-  }
+  const account = text(form, "account");
   const res = await api(`/v1/payer-settings/${encodeURIComponent(payer)}/${env}`, {
     method: "PUT",
-    body: { enabled: form.get("enabled") === "on", ...(any ? { credentials } : {}) },
+    body: { enabled: form.get("enabled") === "on", ...(account ? { account } : {}) },
   });
   if (!res.ok) return { error: res.error.message };
   revalidatePath("/console", "layout");
-  return { ok: any ? "Credentials saved and sealed. Check the connection next." : "Saved." };
+  return { ok: "Saved." };
 }
 
 export async function togglePayer(form: FormData) {
@@ -141,14 +136,80 @@ export async function togglePayer(form: FormData) {
   revalidatePath("/console", "layout");
 }
 
-export async function checkPayer(_: FormState, form: FormData): Promise<FormState> {
+// saveAccount seals the organisation's credentials on a platform (or on a
+// standalone payer's own interface). Every field is sent together.
+export async function saveAccount(_: FormState, form: FormData): Promise<FormState> {
+  const connector = text(form, "connector");
+  const env = text(form, "environment");
+  const credentials: Record<string, string> = {};
+  for (const [k, v] of form.entries()) {
+    if (k.startsWith("cred_")) credentials[k.slice(5)] = String(v);
+  }
+  const res = await api(`/v1/connector-accounts/${encodeURIComponent(connector)}/${env}`, {
+    method: "PUT",
+    body: { credentials },
+  });
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console", "layout");
+  return { ok: "Account saved and sealed. Check the connection next." };
+}
+
+export async function checkAccount(_: FormState, form: FormData): Promise<FormState> {
   const res = await api<{ ok: boolean; message: string }>(
-    `/v1/payer-settings/${encodeURIComponent(text(form, "payer"))}/${text(form, "environment")}/check`,
+    `/v1/connector-accounts/${encodeURIComponent(text(form, "connector"))}/${text(form, "environment")}/check`,
     { method: "POST" },
   );
   revalidatePath("/console", "layout");
-  // The result is saved on the insurer setting and shown from there.
-  return res.ok ? {} : { error: res.error.message };
+  // A saved account shows its result from the stored check; a connector with
+  // no account to store (the sandbox payer) shows it here.
+  if (!res.ok) return { error: res.error.message };
+  return form.get("show") === "1" ? (res.data.ok ? { ok: res.data.message } : { error: res.data.message }) : {};
+}
+
+export type SuggestState = FormState & {
+  rows?: { code: string; name: string; suggestions: Suggestion[] }[];
+};
+
+// suggestMappings reads a pasted list ("code, name" per line) and asks for
+// standard items that may match each.
+export async function suggestMappings(_: SuggestState, form: FormData): Promise<SuggestState> {
+  const items = String(form.get("list") ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const m = line.match(/^([^,\t;]+)[,\t;]\s*(.+)$/);
+      return m ? { code: m[1].trim(), name: m[2].trim() } : { code: line, name: line };
+    });
+  if (!items.length) return { error: "Paste at least one line: your code, then the item's name." };
+  if (items.length > 200) return { error: "Up to 200 lines at a time." };
+  const res = await api<{ data: { code: string; name: string; suggestions: Suggestion[] }[] }>("/v1/items/suggest", {
+    method: "POST",
+    body: { items },
+  });
+  if (!res.ok) return { error: res.error.message };
+  return { rows: res.data.data };
+}
+
+export async function saveMappings(_: FormState, form: FormData): Promise<FormState> {
+  const mappings = form
+    .getAll("row")
+    .map(String)
+    .map((i) => ({ local_code: text(form, `code_${i}`), local_name: text(form, `name_${i}`), item_id: text(form, `item_${i}`) }))
+    .filter((m) => m.item_id);
+  if (!mappings.length) return { error: "Choose a standard item for at least one line." };
+  const res = await api("/v1/item-mappings", { method: "PUT", body: { mappings } });
+  if (!res.ok) {
+    const details = res.error.details as Record<string, string> | undefined;
+    return { error: details ? Object.entries(details).map(([k, v]) => `${k}: ${v}`).join(" ") : res.error.message };
+  }
+  revalidatePath("/console", "layout");
+  return { ok: `${mappings.length} mapping${mappings.length === 1 ? "" : "s"} saved.` };
+}
+
+export async function deleteMapping(form: FormData) {
+  await api(`/v1/item-mappings/${encodeURIComponent(text(form, "code"))}`, { method: "DELETE" });
+  revalidatePath("/console", "layout");
 }
 
 export async function createKey(_: FormState, form: FormData): Promise<FormState> {
@@ -181,12 +242,9 @@ export async function sendTestClaim(form: FormData) {
       member: { member_number: member },
       provider: { name: "Sandbox clinic" },
       encounter: { start_date: new Date().toISOString().slice(0, 10) },
+      // Standard item codes: the API turns each into the insurer's own code.
       lines: [
-        {
-          description: "Consultation, general practitioner",
-          unit_price: 15000,
-          mapping: { source: { system: "local", value: "CONS" }, target: { system: "payer:sandbox", value: "C01" } },
-        },
+        { description: "Consultation, general practitioner", unit_price: 15000, code: { system: "payahub", value: "SRV-0001" } },
       ],
       diagnoses: [{ code: { system: "icd-10", value: "B54" }, role: "primary" }],
     },

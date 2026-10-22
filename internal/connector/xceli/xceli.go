@@ -18,6 +18,7 @@ const Key = "xceli"
 var manifest = connector.Manifest{
 	Key:     Key,
 	Name:    "XCeli",
+	Kind:    connector.KindPlatform,
 	Country: "GH",
 	Channel: connector.ChannelAPI,
 	Verbs: []connector.Verb{
@@ -28,11 +29,14 @@ var manifest = connector.Manifest{
 	MemberOTPRequired: true,
 	Credentials: []connector.CredentialField{
 		{Name: "auth_base_url", Label: "Auth server URL", Required: true},
-		{Name: "insurer_api_url", Label: "Insurer API URL", Required: true},
 		{Name: "username", Label: "Portal username", Required: true},
 		{Name: "password", Label: "Portal password", Secret: true, Required: true},
 		{Name: "provider_id", Label: "Provider ID", Required: true},
 		{Name: "provider_name", Label: "Provider name", Required: true},
+	},
+	// Each insurer on XCeli runs its own API server; sign-in is shared.
+	PayerFields: []connector.CredentialField{
+		{Name: "insurer_api_url", Label: "Insurer API URL", Required: true},
 	},
 	Submission: connector.DefaultSubmissionConfig(),
 	Status:     connector.StatusPorting,
