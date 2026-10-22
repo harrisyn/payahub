@@ -1,6 +1,6 @@
 import "server-only";
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { api } from "./api";
 import type { OrgView } from "./types";
@@ -13,4 +13,12 @@ export async function requireOrg(): Promise<OrgView> {
     throw new Error(res.error.message);
   }
   return res.data;
+}
+
+// requireOperator is requireOrg for the operator pages; anyone else gets a 404,
+// so the pages do not reveal they exist.
+export async function requireOperator(): Promise<OrgView> {
+  const org = await requireOrg();
+  if (!org.operator) notFound();
+  return org;
 }

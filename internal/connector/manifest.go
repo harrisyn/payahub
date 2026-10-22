@@ -8,6 +8,7 @@ type Verb string
 const (
 	VerifyMember         Verb = "verify_member"
 	SendOTP              Verb = "send_otp"
+	ValidateOTP          Verb = "validate_otp"
 	RequestAuthorization Verb = "request_authorization"
 	SubmitWholeClaim     Verb = "submit_whole_claim"
 	OpenClaim            Verb = "open_claim"
@@ -15,9 +16,11 @@ const (
 	UpdateLine           Verb = "update_line"
 	DeleteLine           Verb = "delete_line"
 	AddDiagnosis         Verb = "add_diagnosis"
+	DeleteDiagnosis      Verb = "delete_diagnosis"
 	FinalizeClaim        Verb = "finalize_claim"
 	WithdrawClaim        Verb = "withdraw_claim"
 	FindClaim            Verb = "find_claim"
+	FetchClaim           Verb = "fetch_claim"
 	ListCatalog          Verb = "list_catalog"
 	ConvertEncounterType Verb = "convert_encounter_type"
 )
@@ -35,6 +38,17 @@ type CredentialField struct {
 	Label    string `json:"label"`
 	Secret   bool   `json:"secret"`
 	Required bool   `json:"required"`
+	// Default fills the field when the organisation leaves it empty (a
+	// platform's usual sign-in server, say).
+	Default string `json:"default,omitempty"`
+}
+
+// Value is the field's value in m, or its default.
+func (f CredentialField) Value(m map[string]string) string {
+	if v := m[f.Name]; v != "" {
+		return v
+	}
+	return f.Default
 }
 
 // SubmissionConfig holds per-payer claim-building rules, overridable per

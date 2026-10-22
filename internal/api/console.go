@@ -169,7 +169,7 @@ func (s *Server) getOrganization(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	out := map[string]any{"organization": o, "usage": usage}
+	out := map[string]any{"organization": o, "usage": usage, "operator": org.Operator}
 	if o.Profile != nil {
 		out["recommendation"] = onboarding.Recommend(*o.Profile)
 	}

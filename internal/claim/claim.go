@@ -112,11 +112,29 @@ type Line struct {
 	// item ({"system": "payahub", "value": "MED-0001"}).
 	Code *Code `json:"code,omitempty"`
 	// Item is the standard item the line resolved to.
-	Item        string       `json:"item,omitempty"`
-	Mapping     *CodeMapping `json:"mapping,omitempty"`
-	Quantity    int64        `json:"quantity"`
-	UnitPrice   int64        `json:"unit_price"` // minor units
-	ServiceDate *Date        `json:"service_date,omitempty"`
+	Item      string       `json:"item,omitempty"`
+	Mapping   *CodeMapping `json:"mapping,omitempty"`
+	Quantity  int64        `json:"quantity"`
+	UnitPrice int64        `json:"unit_price"` // minor units
+	// PriceFrom is "price_list" when the line gave no price and took the
+	// organisation's price for its code.
+	PriceFrom   string `json:"price_from,omitempty"`
+	ServiceDate *Date  `json:"service_date,omitempty"`
+	// Prescription is how a drug line was prescribed. Some payers (SmartClaims)
+	// refuse a medicine without it.
+	Prescription *Prescription `json:"prescription,omitempty"`
+}
+
+type Prescription struct {
+	Dose         string `json:"dose,omitempty"`
+	Frequency    string `json:"frequency,omitempty"`
+	Duration     string `json:"duration,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+// Empty reports whether the prescription says nothing.
+func (p *Prescription) Empty() bool {
+	return p == nil || strings.TrimSpace(p.Dose+p.Frequency+p.Duration+p.Instructions) == ""
 }
 
 func (l Line) Total() int64 { return l.UnitPrice * l.Quantity }
@@ -128,10 +146,22 @@ const (
 	Secondary DiagnosisRole = "secondary"
 )
 
+// DiagnosisStatus is the clinician's certainty. Payers that distinguish
+// them (SmartClaims) are told provisional unless the diagnosis is confirmed.
+type DiagnosisStatus string
+
+const (
+	Provisional DiagnosisStatus = "provisional"
+	Confirmed   DiagnosisStatus = "confirmed"
+)
+
 type Diagnosis struct {
-	Code    Code          `json:"code"`
-	Role    DiagnosisRole `json:"role,omitempty"`
-	Mapping *CodeMapping  `json:"mapping,omitempty"`
+	Code Code          `json:"code"`
+	Role DiagnosisRole `json:"role,omitempty"`
+	// Description is the diagnosis in words; the ICD-10 name when not given.
+	Description string          `json:"description,omitempty"`
+	Status      DiagnosisStatus `json:"status,omitempty"`
+	Mapping     *CodeMapping    `json:"mapping,omitempty"`
 }
 
 type Provenance struct {
@@ -151,6 +181,14 @@ type Input struct {
 	Lines             []Line      `json:"lines"`
 	Diagnoses         []Diagnosis `json:"diagnoses"`
 	AuthorizationCode string      `json:"authorization_code,omitempty"`
+	// OTP is the code the member received, with the challenge the payer
+	// returned when it was sent (some payers need both on the claim).
+	OTP *OTP `json:"otp,omitempty"`
+}
+
+type OTP struct {
+	Code      string `json:"code"`
+	Challenge string `json:"challenge,omitempty"`
 }
 
 type Claim struct {
@@ -254,6 +292,9 @@ func (in *Input) Check() []FieldError {
 	for i, d := range in.Diagnoses {
 		if strings.TrimSpace(d.Code.Value) == "" || strings.TrimSpace(d.Code.System) == "" {
 			add(fmt.Sprintf("diagnoses[%d].code", i), "needs a system and a value")
+		}
+		if d.Status != "" && d.Status != Provisional && d.Status != Confirmed {
+			add(fmt.Sprintf("diagnoses[%d].status", i), "must be provisional or confirmed")
 		}
 	}
 	return errs

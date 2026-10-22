@@ -267,3 +267,160 @@ export async function choosePlan(_: FormState, form: FormData): Promise<FormStat
         : "Plan chosen. Live claims are no longer capped by the trial.",
   };
 }
+
+// Operator actions edit the shared catalogue. The API checks the operator
+// role on every call; these only shape the forms.
+
+export async function savePayer(_: FormState, form: FormData): Promise<FormState> {
+  const id = text(form, "id").toLowerCase();
+  const fields: Record<string, string> = {};
+  for (const [k, v] of form.entries()) {
+    if (k.startsWith("field_")) fields[k.slice(6)] = String(v).trim();
+  }
+  const res = await api(`/v1/operator/payers/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: {
+      name: text(form, "name"),
+      country: text(form, "country"),
+      connector: text(form, "connector"),
+      fields,
+      notes: text(form, "notes"),
+      inactive: form.get("inactive") === "on",
+    },
+  });
+  if (!res.ok) {
+    const details = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: details && typeof details === "object" ? details : undefined };
+  }
+  revalidatePath("/console", "layout");
+  if (form.get("new") === "1") redirect(`/console/operator/${id}`);
+  return { ok: "Saved. Every organisation sees the change within a few seconds." };
+}
+
+export type CodesState = FormState & { warnings?: string[] };
+
+// saveCodes sends only the rows whose code the operator changed; an emptied
+// code removes the payer's code for that item.
+export async function saveCodes(_: CodesState, form: FormData): Promise<CodesState> {
+  const payer = text(form, "payer");
+  const changes: { item_id: string; code: string }[] = [];
+  for (const [k, v] of form.entries()) {
+    if (!k.startsWith("code:")) continue;
+    const item = k.slice(5);
+    const code = String(v).trim();
+    if (code !== text(form, `was:${item}`)) changes.push({ item_id: item, code });
+  }
+  if (!changes.length) return { error: "Nothing changed." };
+  const res = await api<{ applied: number; warnings: string[] }>(`/v1/operator/payers/${encodeURIComponent(payer)}/codes`, {
+    method: "PUT",
+    body: { changes },
+  });
+  if (!res.ok) {
+    const details = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: details && typeof details === "object" ? details : undefined };
+  }
+  revalidatePath("/console/operator", "layout");
+  return { ok: `${res.data.applied} ${res.data.applied === 1 ? "code" : "codes"} saved.`, warnings: res.data.warnings };
+}
+
+export async function acceptSuggestions(_: FormState, form: FormData): Promise<FormState> {
+  const payer = text(form, "payer");
+  const res = await api<{ applied: number }>(`/v1/operator/payers/${encodeURIComponent(payer)}/codes/accept`, {
+    method: "POST",
+    body: { min_confidence: Number(text(form, "min_confidence")) || 0.9 },
+  });
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console/operator", "layout");
+  return res.data.applied
+    ? { ok: `${res.data.applied} ${res.data.applied === 1 ? "match" : "matches"} accepted.` }
+    : { error: "No match was sure enough. Map the rest by hand." };
+}
+
+export type ListState = FormState & { skipped?: { line: number; reason: string }[] };
+
+export async function loadPayerList(_: ListState, form: FormData): Promise<ListState> {
+  const payer = text(form, "payer");
+  const file = form.get("file");
+  let csv = text(form, "csv");
+  if (file instanceof File && file.size > 0) csv = await file.text();
+  if (!csv) return { error: "Choose a CSV file or paste the list." };
+  const res = await api<{ entries: number; skipped: { line: number; reason: string }[] }>(
+    `/v1/operator/payers/${encodeURIComponent(payer)}/list`,
+    { method: "PUT", body: { csv } },
+  );
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console/operator", "layout");
+  return { ok: `${res.data.entries.toLocaleString("en-GB")} codes loaded. This replaces the earlier list.`, skipped: res.data.skipped };
+}
+
+// Price list. The file goes to the API as base64; prices are typed in major
+// units here and sent in minor units.
+
+export type ImportState = FormState & {
+  skipped?: { line: number; reason: string }[];
+  changes?: { added: number; changed: number; unchanged: number; removed: number };
+};
+
+export async function importPrices(_: ImportState, form: FormData): Promise<ImportState> {
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV or Excel file." };
+  if (file.size > 16 << 20) return { error: "The file is over 16 MB. Split it and import each part." };
+  const res = await api<{ rows: number; skipped: { line: number; reason: string }[]; changes: ImportState["changes"] }>(
+    "/v1/price-list/import",
+    {
+      method: "POST",
+      body: {
+        file: Buffer.from(await file.arrayBuffer()).toString("base64"),
+        mode: text(form, "mode") === "replace" ? "replace" : "merge",
+        currency: text(form, "currency") || "GHS",
+      },
+    },
+  );
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console", "layout");
+  return { ok: `${res.data.rows.toLocaleString("en-GB")} prices read.`, skipped: res.data.skipped, changes: res.data.changes };
+}
+
+export async function addPrice(_: FormState, form: FormData): Promise<FormState> {
+  const price = Number(text(form, "price").replace(/,/g, ""));
+  if (!Number.isFinite(price) || price < 0 || text(form, "price") === "") return { error: "Enter the price, like 45.00." };
+  const res = await api("/v1/price-list", {
+    method: "PUT",
+    body: {
+      prices: [
+        {
+          local_code: text(form, "code"),
+          name: text(form, "name"),
+          kind: text(form, "kind"),
+          unit_price: Math.round(price * 100),
+          currency: text(form, "currency") || "GHS",
+        },
+      ],
+    },
+  });
+  if (!res.ok) {
+    const details = res.error.details as Record<string, string> | undefined;
+    return { error: details ? `This line has ${Object.values(details).join(", ")}.` : res.error.message };
+  }
+  revalidatePath("/console", "layout");
+  return { ok: "Saved." };
+}
+
+export async function deletePrice(form: FormData) {
+  await api(`/v1/price-list/${encodeURIComponent(text(form, "code"))}`, { method: "DELETE" });
+  revalidatePath("/console", "layout");
+}
+
+// confirmItems saves the standard item for one or more of the price list's
+// codes, as a person's confirmation.
+export async function confirmItems(form: FormData) {
+  const mappings = form.getAll("pick").map((v) => {
+    const [local_code, item_id, ...name] = String(v).split("\u001f");
+    return { local_code, item_id, local_name: name.join("") };
+  });
+  for (let i = 0; i < mappings.length; i += 500) {
+    const res = await api("/v1/item-mappings", { method: "PUT", body: { mappings: mappings.slice(i, i + 500) } });
+    if (!res.ok) break;
+  }
+  revalidatePath("/console", "layout");
+}

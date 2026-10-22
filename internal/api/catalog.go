@@ -3,10 +3,12 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/connector"
+	"github.com/harrisyn/payahub/internal/icd10"
 	"github.com/harrisyn/payahub/internal/store"
 )
 
@@ -19,6 +21,7 @@ func (s *Server) catalogRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/items", s.listItems)
 	mux.HandleFunc("GET /v1/items/{id}", s.getItem)
 	mux.Handle("POST /v1/items/suggest", s.auth(s.suggestItems))
+	mux.HandleFunc("GET /v1/diagnoses", s.searchDiagnoses)
 	mux.Handle("GET /v1/item-mappings", s.auth(s.listItemMappings))
 	mux.Handle("PUT /v1/item-mappings", s.auth(s.putItemMappings))
 	mux.Handle("DELETE /v1/item-mappings/{code}", s.auth(s.deleteItemMapping))
@@ -210,4 +213,13 @@ func (s *Server) deleteItemMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// searchDiagnoses finds ICD-10 codes by code prefix or by words.
+func (s *Server) searchDiagnoses(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": icd10.Search(r.URL.Query().Get("q"), limit)})
 }

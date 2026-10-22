@@ -1,4 +1,4 @@
-import type { ClaimState, Item, ItemKind, Method } from "./types";
+import type { ClaimState, Connector, Item, ItemKind, Method } from "./types";
 
 export const money = (minor: number, currency = "GHS") =>
   `${currency} ${(minor / 100).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -68,3 +68,7 @@ export const kindName: Record<ItemKind, string> = {
 export function itemLabel(it: Item) {
   return `${it.name} (${kindName[it.kind]}, ${it.id})`;
 }
+
+// fieldLabels names a connector's payer setting the way its form does.
+export const fieldLabels = (connectors: Connector[]) => (connector: string, field: string) =>
+  connectors.find((c) => c.id === connector)?.payer_fields.find((f) => f.name === field)?.label ?? field;

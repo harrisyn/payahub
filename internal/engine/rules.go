@@ -5,6 +5,7 @@ import (
 
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/connector"
+	"github.com/harrisyn/payahub/internal/icd10"
 )
 
 type Severity string
@@ -68,6 +69,15 @@ func Check(c *claim.Claim, cfg connector.SubmissionConfig) []Issue {
 		}
 	}
 	for i, d := range c.Diagnoses {
+		if icd10.Is(d.Code.System) {
+			field := fmt.Sprintf("diagnoses[%d].code", i)
+			switch _, st := icd10.Check(d.Code.Value); st {
+			case icd10.Invalid:
+				add("diagnosis_invalid", SeverityError, field, fmt.Sprintf("%q is not an ICD-10 code (like B50.9).", d.Code.Value))
+			case icd10.Unknown:
+				add("diagnosis_unknown", SeverityWarning, field, d.Code.Value+" is not in ICD-10; the payer may reject it.")
+			}
+		}
 		field := fmt.Sprintf("diagnoses[%d].mapping", i)
 		switch {
 		case !d.Mapping.Mapped() && cfg.UnmappedDiagnosisPolicy == "block":

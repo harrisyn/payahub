@@ -31,6 +31,8 @@ export type OrgView = {
   usage: Usage;
   recommendation?: Recommendation;
   onboarding: { id: "account" | "profile" | "payers" | "items" | "first_claim" | "go_live"; done: boolean }[];
+  // Operators run Payahub and edit the shared catalogue.
+  operator: boolean;
 };
 
 export type CredentialField = { name: string; label: string; secret: boolean; required: boolean };
@@ -128,3 +130,49 @@ export type ClaimSummary = {
 };
 
 export type ClaimEvent = { id: number; kind: string; from_state?: string; to_state: string; detail?: unknown; created_at: string };
+
+// The operator's view of a catalogue payer: its settings on its connector and
+// how far its codes are mapped.
+export type OpPayer = Payer & {
+  fields: Record<string, string>;
+  inactive: boolean;
+  missing_fields: string[];
+  list_size: number;
+  total_items: number;
+};
+
+export type ListEntry = { code: string; name: string; group?: string; price?: number };
+
+export type ItemCode = {
+  item: Item;
+  code: { code: string; description?: string } | null;
+  in_list?: boolean;
+  generated?: boolean;
+  suggestions: (ListEntry & { confidence: number })[];
+};
+
+export type PayerCodes = {
+  data: ItemCode[];
+  coverage: Record<string, { coded: number; total: number }>;
+  list_size: number;
+};
+
+export type CatalogChange = {
+  kind: "payer_created" | "payer_updated" | "codes_changed" | "list_loaded" | "seed";
+  detail: Record<string, unknown>;
+  changed_by: string;
+  changed_at: string;
+};
+
+export type Price = {
+  local_code: string;
+  name: string;
+  kind?: ItemKind;
+  unit_price: number;
+  currency: string;
+  item_id?: string;
+  updated_at: string;
+  suggestion?: Suggestion;
+};
+
+export type Diagnosis = { code: string; title: string; billable: boolean };

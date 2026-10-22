@@ -177,8 +177,10 @@ func (s *Store) Logout(ctx context.Context, token string) error {
 func (s *Store) authenticateSession(ctx context.Context, h []byte) (Org, error) {
 	o := Org{Environment: "sandbox", Session: true}
 	err := s.Pool.QueryRow(ctx, `
-		SELECT organization_id, user_id FROM sessions WHERE token_sha256 = $1 AND expires_at > now()`, h).
-		Scan(&o.ID, &o.UserID)
+		SELECT s.organization_id, s.user_id, u.operator
+		FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.token_sha256 = $1 AND s.expires_at > now()`, h).
+		Scan(&o.ID, &o.UserID, &o.Operator)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Org{}, ErrUnauthenticated
 	}

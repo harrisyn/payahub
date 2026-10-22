@@ -177,7 +177,7 @@ const switches = [
   {
     text: "Keep insurer passwords out of sight",
     then: "Sealed with AES-256 before they are stored. Nobody can read them back from the console.",
-    field: "orange",
+    field: "indigo",
     on: false,
   },
   {

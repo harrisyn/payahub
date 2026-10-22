@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { site } from "@/app/site";
+import { Logo } from "@/components/logo";
 
 export const metadata: Metadata = {
   title: "API reference",
@@ -61,8 +62,8 @@ export default function Docs() {
   return (
     <div className="docs">
       <header className="nav wrap">
-        <Link href="/" className="wordmark">
-          {site.name}
+        <Link href="/" className="nav__brand" aria-label={`${site.name} home`}>
+          <Logo />
         </Link>
         <nav aria-label="Main" className="nav__links">
           <Link href="/#pricing">Pricing</Link>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { site } from "@/app/site";
 import { SignUpForm } from "@/components/forms";
 import { TRIAL_DAYS, TRIAL_LIVE_CLAIMS } from "@/lib/pricing";
+import { Logo } from "@/components/logo";
 
 export const metadata: Metadata = {
   title: "Start your free trial",
@@ -15,8 +16,8 @@ export default function Start() {
   return (
     <div className="auth">
       <header className="nav wrap">
-        <Link href="/" className="wordmark">
-          {site.name}
+        <Link href="/" className="nav__brand" aria-label={`${site.name} home`}>
+          <Logo />
         </Link>
         <nav aria-label="Account" className="nav__links nav__links--always">
           <Link href="/signin">Sign in</Link>

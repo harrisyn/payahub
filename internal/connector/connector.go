@@ -14,7 +14,13 @@ type MemberVerification struct {
 	Eligible    bool         `json:"eligible"`
 	Member      claim.Member `json:"member"`
 	PlanName    string       `json:"plan_name,omitempty"`
+	PlanID      string       `json:"plan_id,omitempty"`
 	OTPRequired bool         `json:"otp_required"`
+	// Reason is why a member is not eligible: inactive, not_covered_here,
+	// expired. Message is the payer's own words.
+	Reason    string      `json:"reason,omitempty"`
+	Message   string      `json:"message,omitempty"`
+	CoverEnds *claim.Date `json:"cover_ends,omitempty"`
 }
 
 type Receipt struct {
@@ -27,22 +33,66 @@ type Receipt struct {
 
 // Connector is the typed verb surface. A connector embeds Unsupported and
 // overrides the verbs its manifest lists.
+//
+// Claim verbs take the Submission (engine.Build's payer-ready view of the
+// claim). The incremental verbs are driven by engine.Send, which records each
+// step as it completes, so a retry resumes rather than repeats.
 type Connector interface {
 	Manifest() Manifest
+
+	// Member checks.
 	VerifyMember(ctx context.Context, memberNumber, otp string) (MemberVerification, error)
-	SubmitWholeClaim(ctx context.Context, c *claim.Claim) (Receipt, error)
-	OpenClaim(ctx context.Context, c *claim.Claim) (string, error)
-	AddLine(ctx context.Context, payerClaimNumber string, l claim.Line) (string, error)
-	AddDiagnosis(ctx context.Context, payerClaimNumber string, d claim.Diagnosis) error
-	FinalizeClaim(ctx context.Context, payerClaimNumber string, c *claim.Claim) (Receipt, error)
+	// SendOTP asks the payer to send the member a one-time code. Some payers
+	// return a challenge that must travel with the code on the claim.
+	SendOTP(ctx context.Context, memberNumber string) (challenge string, err error)
+	ValidateOTP(ctx context.Context, memberNumber, otp string) error
+
+	// Whole-claim path: one call carries every line and diagnosis.
+	SubmitWholeClaim(ctx context.Context, s *Submission) (Receipt, error)
+
+	// Incremental path: open, then lines and diagnoses one by one, then finalize.
+	OpenClaim(ctx context.Context, s *Submission) (string, error)
+	// AddLine may return a ref with an error when the payer stored the line
+	// but needs something before it counts (an approval): the ref is kept.
+	AddLine(ctx context.Context, s *Submission, number string, l SendLine) (ref string, err error)
+	// UpdateLine returns the line's new ref, or "" when it is unchanged.
+	UpdateLine(ctx context.Context, s *Submission, number, ref string, l SendLine) (newRef string, err error)
+	DeleteLine(ctx context.Context, s *Submission, number, ref string) error
+	AddDiagnosis(ctx context.Context, s *Submission, number string, d SendDiagnosis) (ref string, err error)
+	DeleteDiagnosis(ctx context.Context, s *Submission, number, ref string) error
+	FinalizeClaim(ctx context.Context, s *Submission, number string) (Receipt, error)
+
 	// FindClaim looks a claim up by our claim ID, which every connector sends
 	// as the payer-side external reference. The worker calls it before any
-	// resend, so a crash between "payer accepted" and "we recorded it" never
-	// produces a duplicate claim at the payer.
-	FindClaim(ctx context.Context, c *claim.Claim) (*Receipt, error)
+	// whole-claim resend, so a crash between "payer accepted" and "we
+	// recorded it" never produces a duplicate claim at the payer.
+	FindClaim(ctx context.Context, s *Submission) (*Receipt, error)
+	// FetchClaim reads a claim the payer holds by its number: its lines for
+	// reconciling an interrupted incremental send, and its status after.
+	FetchClaim(ctx context.Context, number string) (*PayerClaim, error)
+
+	// ListCatalog downloads the payer's own code list, for provisioning.
+	ListCatalog(ctx context.Context, kind CatalogKind) ([]CatalogEntry, error)
 }
 
 // Unsupported answers every verb with NOT_SUPPORTED.
+// RefKeyer is implemented by connectors whose line refs carry more than the
+// payer's id for the line (Medserve keeps the dispensation and the cost the
+// insurer accepted beside the prescription row). RefKey gives the part that
+// identifies the line, so a ref we recorded and the ref FetchClaim reports
+// for the same line compare equal.
+type RefKeyer interface {
+	RefKey(ref string) string
+}
+
+// RefKey is the identity of a line ref for conn.
+func RefKey(conn Connector, ref string) string {
+	if k, ok := conn.(RefKeyer); ok {
+		return k.RefKey(ref)
+	}
+	return ref
+}
+
 type Unsupported struct{ Name string }
 
 func (u Unsupported) err(v Verb) error {
@@ -52,23 +102,42 @@ func (u Unsupported) err(v Verb) error {
 func (u Unsupported) VerifyMember(context.Context, string, string) (MemberVerification, error) {
 	return MemberVerification{}, u.err(VerifyMember)
 }
-func (u Unsupported) SubmitWholeClaim(context.Context, *claim.Claim) (Receipt, error) {
+func (u Unsupported) SendOTP(context.Context, string) (string, error) { return "", u.err(SendOTP) }
+func (u Unsupported) ValidateOTP(context.Context, string, string) error {
+	return u.err(ValidateOTP)
+}
+func (u Unsupported) SubmitWholeClaim(context.Context, *Submission) (Receipt, error) {
 	return Receipt{}, u.err(SubmitWholeClaim)
 }
-func (u Unsupported) OpenClaim(context.Context, *claim.Claim) (string, error) {
+func (u Unsupported) OpenClaim(context.Context, *Submission) (string, error) {
 	return "", u.err(OpenClaim)
 }
-func (u Unsupported) AddLine(context.Context, string, claim.Line) (string, error) {
+func (u Unsupported) AddLine(context.Context, *Submission, string, SendLine) (string, error) {
 	return "", u.err(AddLine)
 }
-func (u Unsupported) AddDiagnosis(context.Context, string, claim.Diagnosis) error {
-	return u.err(AddDiagnosis)
+func (u Unsupported) UpdateLine(context.Context, *Submission, string, string, SendLine) (string, error) {
+	return "", u.err(UpdateLine)
 }
-func (u Unsupported) FinalizeClaim(context.Context, string, *claim.Claim) (Receipt, error) {
+func (u Unsupported) DeleteLine(context.Context, *Submission, string, string) error {
+	return u.err(DeleteLine)
+}
+func (u Unsupported) AddDiagnosis(context.Context, *Submission, string, SendDiagnosis) (string, error) {
+	return "", u.err(AddDiagnosis)
+}
+func (u Unsupported) DeleteDiagnosis(context.Context, *Submission, string, string) error {
+	return u.err(DeleteDiagnosis)
+}
+func (u Unsupported) FinalizeClaim(context.Context, *Submission, string) (Receipt, error) {
 	return Receipt{}, u.err(FinalizeClaim)
 }
-func (u Unsupported) FindClaim(context.Context, *claim.Claim) (*Receipt, error) {
+func (u Unsupported) FindClaim(context.Context, *Submission) (*Receipt, error) {
 	return nil, u.err(FindClaim)
+}
+func (u Unsupported) FetchClaim(context.Context, string) (*PayerClaim, error) {
+	return nil, u.err(FetchClaim)
+}
+func (u Unsupported) ListCatalog(context.Context, CatalogKind) ([]CatalogEntry, error) {
+	return nil, u.err(ListCatalog)
 }
 
 // Account is what a connector is built from: the organisation's credentials
@@ -132,7 +201,7 @@ func Manifests() []Manifest {
 // CheckCredentials reports required credential fields that are missing.
 func CheckCredentials(m Manifest, creds map[string]string) error {
 	for _, f := range m.Credentials {
-		if f.Required && creds[f.Name] == "" {
+		if f.Required && f.Value(creds) == "" {
 			return Errorf(InvalidCredentials, "%s is missing credential %q", m.Name, f.Name)
 		}
 	}
