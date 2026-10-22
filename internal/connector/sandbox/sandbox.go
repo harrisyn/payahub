@@ -39,6 +39,7 @@ var manifest = connector.Manifest{
 	},
 	Submission: connector.DefaultSubmissionConfig(),
 	Notes:      "Simulated payer. Never reaches a real insurer.",
+	Status:     connector.StatusAvailable,
 }
 
 // The payer's "database" is shared by every Sandbox value in the process, as

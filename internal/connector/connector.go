@@ -91,6 +91,9 @@ func Register(m Manifest, f Factory) {
 	if _, dup := registry[m.Key]; dup {
 		panic("connector registered twice: " + m.Key)
 	}
+	if m.Credentials == nil {
+		m.Credentials = []CredentialField{} // JSON [] rather than null
+	}
 	registry[m.Key] = registration{manifest: m, factory: f}
 }
 
@@ -121,6 +124,21 @@ func CheckCredentials(m Manifest, creds map[string]string) error {
 	}
 	return nil
 }
+
+// Pending is the factory for a connector whose manifest is known but whose
+// adapter is not ported yet: every verb answers NOT_SUPPORTED.
+func Pending(m Manifest) Factory {
+	return func(map[string]string) (Connector, error) {
+		return pending{Unsupported{Name: m.Name + " (not yet ported)"}, m}, nil
+	}
+}
+
+type pending struct {
+	Unsupported
+	m Manifest
+}
+
+func (p pending) Manifest() Manifest { return p.m }
 
 // New builds the connector registered under key.
 func New(key string, creds map[string]string) (Connector, error) {

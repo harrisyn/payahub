@@ -74,7 +74,15 @@ type Manifest struct {
 	Credentials       []CredentialField `json:"credentials"`
 	Submission        SubmissionConfig  `json:"submission"`
 	Notes             string            `json:"notes,omitempty"`
+	// Status is "available" once the adapter is ported and tested, "porting"
+	// while only the manifest exists. The console shows it next to the payer.
+	Status string `json:"status"`
 }
+
+const (
+	StatusAvailable = "available"
+	StatusPorting   = "porting"
+)
 
 func (m Manifest) Supports(v Verb) bool {
 	for _, x := range m.Verbs {

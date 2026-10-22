@@ -39,8 +39,8 @@ var (
 type Store struct {
 	Pool *pgxpool.Pool
 
-	// keys caches API key lookups for keyTTL, so a revoked key stops working
-	// within that window without a database read on every request.
+	// keys caches API key and session lookups for keyTTL, so a revoked key
+	// stops working within that window without a database read per request.
 	keys sync.Map // sha256 string -> cachedKey
 }
 
@@ -102,22 +102,31 @@ func NewID(prefix string) string { return prefix + "_" + uuid.Must(uuid.NewV7())
 
 func hashKey(raw string) []byte { h := sha256.Sum256([]byte(raw)); return h[:] }
 
+// Org is who a request acts for: an API key (one environment) or a console
+// session (a signed-in user, sandbox by default).
 type Org struct {
 	ID          string
 	Environment string
+	Session     bool
+	UserID      string
 }
 
-// Authenticate resolves an API key to its organisation and environment.
-func (s *Store) Authenticate(ctx context.Context, rawKey string) (Org, error) {
-	h := hashKey(rawKey)
+// Authenticate resolves an API key or a console session token.
+func (s *Store) Authenticate(ctx context.Context, raw string) (Org, error) {
+	h := hashKey(raw)
 	if v, ok := s.keys.Load(string(h)); ok && time.Now().Before(v.(cachedKey).expires) {
 		return v.(cachedKey).org, nil
 	}
 	var o Org
-	err := s.Pool.QueryRow(ctx, `
-		SELECT organization_id, environment FROM api_keys
-		WHERE key_sha256 = $1 AND revoked_at IS NULL`, h).Scan(&o.ID, &o.Environment)
-	if errors.Is(err, pgx.ErrNoRows) {
+	var err error
+	if strings.HasPrefix(raw, sessionPrefix) {
+		o, err = s.authenticateSession(ctx, h)
+	} else {
+		err = s.Pool.QueryRow(ctx, `
+			SELECT organization_id, environment FROM api_keys
+			WHERE key_sha256 = $1 AND revoked_at IS NULL`, h).Scan(&o.ID, &o.Environment)
+	}
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrUnauthenticated) {
 		return Org{}, ErrUnauthenticated
 	}
 	if err == nil {

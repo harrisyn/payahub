@@ -21,6 +21,7 @@ import (
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
 	"github.com/harrisyn/payahub/internal/engine"
 	"github.com/harrisyn/payahub/internal/store"
+	"github.com/harrisyn/payahub/internal/vault"
 )
 
 const (
@@ -44,9 +45,9 @@ type Client = river.Client[pgx.Tx]
 
 // NewClient builds a River client. With workers > 0 it also works jobs;
 // with 0 it only inserts (the API process).
-func NewClient(st *store.Store, workers int, logger *slog.Logger) (*Client, error) {
+func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) (*Client, error) {
 	ws := river.NewWorkers()
-	river.AddWorker(ws, &SubmitWorker{Store: st})
+	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
 	cfg := &river.Config{Workers: ws, Logger: logger}
 	if workers > 0 {
 		cfg.Queues = map[string]river.QueueConfig{SubmissionsQueue: {MaxWorkers: workers}}
@@ -58,6 +59,8 @@ var (
 	// ErrNotSubmittable is returned by Enqueue when validation leaves the claim short of ready.
 	ErrNotSubmittable = errors.New("claim is not ready to submit")
 	ErrUnknownPayer   = errors.New("unknown payer")
+	// ErrTrialLimit is returned for a live claim once the trial has ended or used its live claims.
+	ErrTrialLimit = errors.New("the trial has no live claims left")
 )
 
 // Enqueue validates a claim, moves it to ready and inserts its submit job, all
@@ -79,6 +82,15 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 	m, ok := manifestFor(c)
 	if !ok {
 		return nil, engine.Validation{}, fmt.Errorf("%w %q", ErrUnknownPayer, c.PayerID)
+	}
+	if c.Environment == "live" {
+		allowed, err := store.TrialAllowsLive(ctx, tx, c.OrganizationID)
+		if err != nil {
+			return nil, engine.Validation{}, err
+		}
+		if !allowed {
+			return c, engine.Validation{}, ErrTrialLimit
+		}
 	}
 	overrides, err := store.PayerOverrides(ctx, tx, c.OrganizationID, c.PayerID, c.Environment)
 	if err != nil {
@@ -121,12 +133,24 @@ func manifestFor(c *claim.Claim) (connector.Manifest, bool) {
 	return m, ok
 }
 
-func connectorFor(c *claim.Claim) (connector.Connector, error) {
+// connectorFor builds the claim's connector: the sandbox payer for sandbox
+// claims, otherwise the payer's connector with the organisation's credentials
+// opened from the vault.
+func (w *SubmitWorker) connectorFor(ctx context.Context, c *claim.Claim) (connector.Connector, error) {
 	if c.Environment == "sandbox" {
 		return sandbox.New(nil)
 	}
-	// Live credentials come from the vault (phase 0); until then live claims cannot be sent.
-	return connector.New(c.PayerID, map[string]string{})
+	creds := map[string]string{}
+	sealed, err := store.SealedCredentials(ctx, w.Store.Pool, c.OrganizationID, c.PayerID, c.Environment)
+	if err != nil {
+		return nil, err
+	}
+	if sealed != nil {
+		if creds, err = w.Vault.Open(sealed, vault.Owner(c.OrganizationID, c.PayerID, c.Environment)); err != nil {
+			return nil, err
+		}
+	}
+	return connector.New(c.PayerID, creds)
 }
 
 // SubmitWorker sends one claim. It never holds a database transaction open
@@ -142,6 +166,7 @@ func connectorFor(c *claim.Claim) (connector.Connector, error) {
 type SubmitWorker struct {
 	river.WorkerDefaults[SubmitArgs]
 	Store *store.Store
+	Vault *vault.Vault
 }
 
 func (w *SubmitWorker) Timeout(*river.Job[SubmitArgs]) time.Duration { return 2 * payerTimeout }
@@ -189,7 +214,7 @@ func (w *SubmitWorker) begin(ctx context.Context, job *river.Job[SubmitArgs]) (*
 }
 
 func (w *SubmitWorker) send(ctx context.Context, c *claim.Claim, retry bool) (connector.Receipt, error) {
-	conn, err := connectorFor(c)
+	conn, err := w.connectorFor(ctx, c)
 	if err != nil {
 		return connector.Receipt{}, err
 	}

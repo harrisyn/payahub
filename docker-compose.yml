@@ -14,6 +14,9 @@ services:
     command: ["dev"]
     environment:
       DATABASE_URL: postgres://postgres:payahub@postgres:5432/payahub
+      # Local development only, so saved insurer credentials survive a restart.
+      # Production sets its own: openssl rand -base64 32
+      PAYAHUB_VAULT_KEY: cGF5YWh1Yi1sb2NhbC1kZXYtb25seS12YXVsdC1rZXk=
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }

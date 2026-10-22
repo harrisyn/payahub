@@ -6,6 +6,10 @@ info:
     Send any claim, in any form, to any supported payer.
     Authenticate with `Authorization: Bearer <api key>`. Sandbox keys reach a simulated payer.
     Money is in minor units (pesewas, cents). Every write accepts an `Idempotency-Key`.
+
+    Console endpoints (account, organisation, keys, insurer credentials) take a session token
+    (`ses_…`, from `POST /v1/signup` or `POST /v1/sessions`) in the same header. An API key
+    gets `403 session_required` there, so a leaked key cannot mint keys or read settings.
 servers:
   - url: http://localhost:8080
 security:
@@ -31,7 +35,223 @@ paths:
                 type: object
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/Payer" } }
+  /v1/signup:
+    post:
+      security: []
+      summary: "Start a free trial: creates the organisation, its first user, a session and a sandbox key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name, organization]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 10 }
+                name: { type: string }
+                organization: { type: string }
+                country: { type: string, description: Two-letter code, default GH }
+      responses:
+        "201":
+          description: Created. The sandbox key is shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization_id: { type: string }
+                  user_id: { type: string }
+                  session_token: { type: string }
+                  sandbox_key: { type: string }
+                  trial_ends_at: { type: string, format: date-time }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/sessions:
+    post:
+      security: []
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "201":
+          description: Signed in
+          content:
+            application/json:
+              schema: { type: object, properties: { session_token: { type: string } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/sessions/current:
+    delete:
+      security: [{ session: [] }]
+      summary: Sign out
+      responses:
+        "204": { description: Signed out }
+  /v1/organization:
+    get:
+      security: [{ session: [] }]
+      summary: The organisation, this month's usage, the recommended method and the onboarding steps
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization: { $ref: "#/components/schemas/Organization" }
+                  usage: { $ref: "#/components/schemas/Usage" }
+                  recommendation: { $ref: "#/components/schemas/Recommendation" }
+                  onboarding:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { enum: [account, profile, payers, first_claim, go_live] }
+                        done: { type: boolean }
+  /v1/organization/profile:
+    put:
+      security: [{ session: [] }]
+      summary: Say how the organisation bills today; answers with the recommended way to connect
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/Profile" } }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile: { $ref: "#/components/schemas/Profile" }
+                  recommendation: { $ref: "#/components/schemas/Recommendation" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/organization/plan:
+    put:
+      security: [{ session: [] }]
+      summary: Choose a plan. Enterprise is recorded as a request and agreed offline.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan: { enum: [flat, flat_volume, volume, enterprise] }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { type: object, properties: { plan: { $ref: "#/components/schemas/Plan" } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/api-keys:
+    get:
+      security: [{ session: [] }]
+      summary: List API keys (prefixes only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/APIKey" } } } }
+    post:
+      security: [{ session: [] }]
+      summary: Create an API key. The full key is in this response only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environment]
+              properties:
+                environment: { enum: [sandbox, live] }
+                name: { type: string }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/APIKey" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/api-keys/{id}:
+    delete:
+      security: [{ session: [] }]
+      summary: Revoke an API key
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Revoked }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/payer-settings:
+    get:
+      security: [{ session: [] }]
+      summary: Each insurer's setting per environment. Credential values are never returned, only which fields are set.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PayerSetting" } } } }
+  /v1/payer-settings/{payer}/{env}:
+    put:
+      security: [{ session: [] }]
+      summary: Turn an insurer on or off and, optionally, replace its credentials (sealed with AES-256-GCM)
+      parameters:
+        - { name: payer, in: path, required: true, schema: { type: string } }
+        - { name: env, in: path, required: true, schema: { enum: [sandbox, live] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                credentials:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: Every required field of the payer's manifest. Omit to keep the sealed set.
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PayerSetting" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/payer-settings/{payer}/{env}/check:
+    post:
+      security: [{ session: [] }]
+      summary: Try the saved credentials against the insurer and record the result
+      parameters:
+        - { name: payer, in: path, required: true, schema: { type: string } }
+        - { name: env, in: path, required: true, schema: { enum: [sandbox, live] } }
+      responses:
+        "200":
+          description: Checked
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, message: { type: string } } }
   /v1/claims:
+    get:
+      summary: List claims, newest first. An API key sees only its own environment.
+      parameters:
+        - { name: environment, in: query, schema: { enum: [sandbox, live] }, description: Session only }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: before, in: query, schema: { type: string, format: date-time }, description: The next_before of the previous page }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ClaimSummary" } }
+                  next_before: { type: string, format: date-time }
     post:
       summary: Create a claim (validated, not yet sent)
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
@@ -42,6 +262,7 @@ paths:
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Claim" } } } }
         "200": { description: Replay of an earlier request with the same Idempotency-Key }
+        "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
   /v1/claims/validate:
     post:
@@ -78,10 +299,12 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ClaimID" }]
       responses:
         "202": { description: Queued }
+        "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
-    apiKey: { type: http, scheme: bearer }
+    apiKey: { type: http, scheme: bearer, description: "sk_sandbox_… or sk_live_…" }
+    session: { type: http, scheme: bearer, description: "ses_… from signup or sign-in" }
   parameters:
     IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
     ClaimID: { name: id, in: path, required: true, schema: { type: string } }
@@ -227,3 +450,75 @@ components:
         capabilities: { type: array, items: { type: string } }
         member_otp_required: { type: boolean }
         credentials: { type: array, items: { type: object } }
+    Plan: { enum: [trial, flat, flat_volume, volume, enterprise, enterprise_requested] }
+    Method: { enum: [rest, batch, documents, web_form] }
+    Profile:
+      type: object
+      required: [billing_system, claims_leave_by, monthly_claims, has_developers]
+      properties:
+        billing_system: { enum: [emr, practice_software, spreadsheets, paper] }
+        claims_leave_by: { enum: [portal, email, paper, integration] }
+        monthly_claims: { type: integer, minimum: 0 }
+        has_developers: { type: boolean }
+        payers: { type: array, items: { type: string } }
+        method: { $ref: "#/components/schemas/Method" }
+    Recommendation:
+      type: object
+      properties:
+        method: { $ref: "#/components/schemas/Method" }
+        reason: { type: string }
+        available: { type: boolean, description: Whether the method can be used today; only rest is, for now }
+        fallback: { $ref: "#/components/schemas/Method" }
+    Organization:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        country: { type: string }
+        plan: { $ref: "#/components/schemas/Plan" }
+        trial_ends_at: { type: [string, "null"], format: date-time }
+        profile: { oneOf: [{ $ref: "#/components/schemas/Profile" }, { type: "null" }] }
+        user: { type: object, properties: { id: { type: string }, name: { type: string }, email: { type: string } } }
+        created_at: { type: string, format: date-time }
+    Usage:
+      type: object
+      properties:
+        month: { type: string, description: YYYY-MM }
+        billable_live: { type: integer, description: Live claims an insurer acknowledged this month }
+        sandbox_claims: { type: integer }
+        live_claims: { type: integer }
+        trial_live_limit: { type: integer }
+    APIKey:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        environment: { enum: [sandbox, live] }
+        prefix: { type: string }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
+        key: { type: string, description: Only in the create response }
+    PayerSetting:
+      type: object
+      properties:
+        payer_id: { type: string }
+        environment: { enum: [sandbox, live] }
+        enabled: { type: boolean }
+        credential_fields: { type: array, items: { type: string }, description: Names of the fields that are set }
+        checked_at: { type: [string, "null"], format: date-time }
+        check_ok: { type: [boolean, "null"] }
+        check_message: { type: string }
+        updated_at: { type: string, format: date-time }
+    ClaimSummary:
+      type: object
+      properties:
+        id: { type: string }
+        environment: { enum: [sandbox, live] }
+        payer_id: { type: string }
+        state: { type: string }
+        payer_claim_number: { type: string }
+        member_number: { type: string }
+        currency: { type: string }
+        total: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

@@ -19,6 +19,7 @@ import (
 	"github.com/harrisyn/payahub/internal/engine"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
+	"github.com/harrisyn/payahub/internal/vault"
 )
 
 const maxBody = 1 << 20 // 1 MiB per claim request
@@ -26,6 +27,7 @@ const maxBody = 1 << 20 // 1 MiB per claim request
 type Server struct {
 	Store  *store.Store
 	Queue  *queue.Client
+	Vault  *vault.Vault
 	Logger *slog.Logger
 }
 
@@ -38,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/claims/{id}", s.auth(s.getClaim))
 	mux.Handle("GET /v1/claims/{id}/events", s.auth(s.claimEvents))
 	mux.Handle("POST /v1/claims/{id}/submit", s.auth(s.submitClaim))
+	s.consoleRoutes(mux)
 	return mux
 }
 
@@ -223,6 +226,9 @@ func (s *Server) submitClaim(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "claim_not_found", "No claim "+r.PathValue("id")+".", nil)
+	case errors.Is(err, queue.ErrTrialLimit):
+		writeError(w, http.StatusPaymentRequired, "trial_limit",
+			"Your trial has no live claims left. Choose a plan to keep sending live claims.", nil)
 	case errors.Is(err, queue.ErrNotSubmittable):
 		writeError(w, http.StatusUnprocessableEntity, "not_submittable",
 			"The claim did not pass validation; it is now "+string(c.State)+".", v.Issues)

@@ -35,15 +35,8 @@ var manifest = func() connector.Manifest {
 			{Name: "api_key", Label: "API key", Secret: true, Required: true},
 		},
 		Submission: sub,
+		Status:     connector.StatusPorting,
 	}
 }()
 
-type ClaimIQ struct{ connector.Unsupported }
-
-func (ClaimIQ) Manifest() connector.Manifest { return manifest }
-
-func init() {
-	connector.Register(manifest, func(map[string]string) (connector.Connector, error) {
-		return ClaimIQ{connector.Unsupported{Name: manifest.Name + " (not yet ported)"}}, nil
-	})
-}
+func init() { connector.Register(manifest, connector.Pending(manifest)) }

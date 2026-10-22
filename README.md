@@ -4,8 +4,10 @@ Send any claim, in any form, to any supported payer. One REST API for
 real-time submission, plus document, batch and web-form intake later, all
 landing in one canonical claim and one AI-assisted, rules-governed engine.
 
-Status: scaffold. The sandbox payer works end to end; real payer connectors
-are ported from Serenity in phases 0 and 1.
+Status: first drop. The landing page, sign-up and onboarding console work end
+to end against the sandbox payer. Real payer connectors (XCeli, Medserve,
+SmartClaims, RX Insurance, ClaimIQ) are listed and take credentials now; their
+send paths are ported from Serenity in phases 0 and 1.
 
 ## Run it
 
@@ -41,6 +43,30 @@ curl -s localhost:8080/v1/claims/<id>/events -H 'Authorization: Bearer sk_sandbo
 Sandbox member numbers starting `NOTFOUND`, `OTP`, `REJECT`, `FLAKY` or
 `LOSTREPLY` exercise the failure and recovery paths. The API is described in
 [`openapi/payahub.v1.yaml`](openapi/payahub.v1.yaml).
+
+### The web app
+
+```bash
+cd apps/web && pnpm install
+PAYAHUB_API_URL=http://localhost:8080 pnpm dev     # http://localhost:3000
+```
+
+The landing page is `/`, sign-up is `/start`, the console is `/console` and the
+API reference is `/docs`. The web server talks to the API from the server side
+only; the session lives in an httpOnly cookie. Console endpoints take a session
+token, never an API key.
+
+### Configuration
+
+| Variable | What |
+| --- | --- |
+| `DATABASE_URL` | Postgres |
+| `PAYAHUB_VAULT_KEY` | Base64 32-byte key that seals insurer credentials (`openssl rand -base64 32`). Required for `api` and `worker`; `dev` makes a throwaway one if unset. Losing it means re-entering every credential. |
+| `PAYAHUB_ADDR` | Listen address, default `:8080` |
+| `PAYAHUB_WORKERS` | Concurrent submissions per worker process, default 100 |
+| `PAYAHUB_API_URL` | (web) Where the web server finds the API |
+| `NEXT_PUBLIC_SITE_URL` | (web) Canonical site URL for metadata and the sitemap |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | (web) The address the landing page shows |
 
 In production run `payahub migrate` once per deploy, then any number of
 `payahub api` and `payahub worker` processes.
