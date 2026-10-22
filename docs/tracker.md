@@ -21,13 +21,16 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 
 ## 2. Services, medicines and diagnoses
 
-- [x] Standard item list (47 items: services, labs, imaging, procedures, medicines with ATC, consumables)
+- [x] Standard item list (services, labs, imaging, procedures, medicines with ATC, consumables)
 - [x] A clinic maps its own codes to standard items once; suggestions to confirm
 - [~] Line resolution: clinic code → standard item → payer code, at create and at send
 - [x] Clinic price list: add, remove, import CSV or Excel (merge or replace, dry run, skipped rows listed);
       a claim line with the clinic's code needs no price or name; each code gets a suggested standard item to confirm
-- [ ] A larger standard list for Ghana (common consultations, the NHIA medicines list, common labs and imaging)
-- [ ] Diagnoses: ICD-10 list, and payer diagnosis codes where a payer uses its own
+- [x] A larger standard list for Ghana: 262 items (consultations and ward days, 43 labs, 24 imaging,
+      20 procedures, 124 medicines with ATC codes, 20 consumables), each found first by its name and every synonym
+- [x] Diagnoses: ICD-10 list (ICD-10-CM plus WHO-only codes in use in Ghana), search, and checks on every claim
+- [ ] Payer diagnosis codes where a payer uses its own; the NHIA medicines list once we have the file
+- [ ] Refresh the ICD-10 list to the latest release (the shipped copy predates 2020; WHO COVID codes are added by hand)
 - [x] Claims carry prescriptions on drug lines and provisional/confirmed status on diagnoses
 
 ## 3. Connectors that really call the platforms

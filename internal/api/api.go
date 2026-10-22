@@ -17,6 +17,7 @@ import (
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/engine"
+	"github.com/harrisyn/payahub/internal/icd10"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
@@ -120,6 +121,14 @@ func (s *Server) readInput(w http.ResponseWriter, r *http.Request) (*claim.Input
 	if err := s.applyPriceList(r.Context(), orgFrom(r.Context()).ID, &in, raw); err != nil {
 		s.internal(w, r, err)
 		return nil, nil, false
+	}
+	for i := range in.Diagnoses {
+		d := &in.Diagnoses[i]
+		if d.Code.Display == "" && icd10.Is(d.Code.System) {
+			if c, st := icd10.Check(d.Code.Value); st == icd10.Listed {
+				d.Code.Display = c.Title
+			}
+		}
 	}
 	if errs := in.Check(); len(errs) > 0 {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_claim", "The claim has missing or invalid fields.", errs)

@@ -5,23 +5,27 @@ import { MappingForm, Submit } from "@/components/forms";
 import { api } from "@/lib/api";
 import { kindName } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
-import type { Item, ItemKind, ItemMapping } from "@/lib/types";
+import type { Diagnosis, Item, ItemKind, ItemMapping } from "@/lib/types";
 
 export const metadata = { title: "Services and medicines" };
 
 const kinds: ItemKind[] = ["service", "lab", "imaging", "procedure", "medication", "consumable"];
 
-export default async function Items({ searchParams }: { searchParams: Promise<{ kind?: string; q?: string }> }) {
+export default async function Items({ searchParams }: { searchParams: Promise<{ kind?: string; q?: string; dq?: string }> }) {
   await requireOrg();
-  const { kind = "", q = "" } = await searchParams;
+  const { kind = "", q = "", dq = "" } = await searchParams;
   const query = new URLSearchParams();
   if (kinds.includes(kind as ItemKind)) query.set("kind", kind);
   if (q.trim()) query.set("q", q.trim());
-  const [mappings, items, catalogue] = await Promise.all([
+  const [mappings, items, catalogue, diagnoses] = await Promise.all([
     api<{ data: ItemMapping[] }>("/v1/item-mappings"),
     api<{ data: Item[] }>("/v1/items"),
     api<{ data: Item[] }>(`/v1/items?${query}`),
+    dq.trim()
+      ? api<{ data: Diagnosis[] }>(`/v1/diagnoses?limit=50&q=${encodeURIComponent(dq.trim())}`)
+      : Promise.resolve(null),
   ]);
+  const found = diagnoses?.ok ? diagnoses.data.data : [];
   const mine = mappings.ok ? mappings.data.data : [];
   const byId = new Map((items.ok ? items.data.data : []).map((it) => [it.id, it]));
   const shown = catalogue.ok ? catalogue.data.data : [];
@@ -152,6 +156,52 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
         </table>
         {shown.length === 0 && <p className="app-muted app-pad">Nothing matches. Try fewer words.</p>}
       </section>
+      <section className="app-card app-card--flush" aria-labelledby="dx-h">
+        <div className="app-card__head app-card__head--pad">
+          <div>
+            <h2 id="dx-h" className="app-card__title">
+              Diagnoses (ICD-10)
+            </h2>
+            <p className="app-muted">Every claim&apos;s diagnosis codes are checked against this list before sending.</p>
+          </div>
+          <form className="app-inline-form" role="search">
+            {kind && <input type="hidden" name="kind" value={kind} />}
+            {q && <input type="hidden" name="q" value={q} />}
+            <div className="field field--inline">
+              <label htmlFor="f-dq">Find a diagnosis</label>
+              <input id="f-dq" name="dq" defaultValue={dq} placeholder="malaria, B50, hypertension…" />
+            </div>
+            <button type="submit" className="app-button">
+              Find
+            </button>
+          </form>
+        </div>
+        {dq.trim() ? (
+          found.length ? (
+            <table className="app-table">
+              <thead>
+                <tr>
+                  <th scope="col">Code</th>
+                  <th scope="col">Diagnosis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {found.map((d) => (
+                  <tr key={d.code}>
+                    <td className="app-id">{d.code}</td>
+                    <td>{d.title}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="app-muted app-pad">No ICD-10 code matches “{dq}”. Try a shorter word or the first letters of the code.</p>
+          )
+        ) : (
+          <p className="app-muted app-pad">Search by words or by the start of a code.</p>
+        )}
+      </section>
+
       <p className="app-muted app-note">
         The standard list is shared by every clinic and grows as we add insurers. Send a standard code straight from
         your system as <code>{`{"system": "payahub", "value": "MED-0001"}`}</code>, or your own code once it is mapped.{" "}

@@ -174,3 +174,5 @@ export type Price = {
   updated_at: string;
   suggestion?: Suggestion;
 };
+
+export type Diagnosis = { code: string; title: string; billable: boolean };

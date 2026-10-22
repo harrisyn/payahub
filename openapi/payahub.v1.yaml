@@ -472,6 +472,32 @@ paths:
         "202": { description: Queued }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/diagnoses:
+    get:
+      summary: Find ICD-10 codes by the start of a code ("B50") or by words ("falciparum malaria")
+      description: |
+        Claims' diagnoses with system `icd-10` (or `icd10`) are checked against this list: a code not shaped
+        like ICD-10 stops the claim (`diagnosis_invalid`); one whose category is not in ICD-10 is a warning
+        (`diagnosis_unknown`). A listed code with no `display` gets its title.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string, example: B50.9 }
+                        title: { type: string }
+                        billable: { type: boolean }
   /v1/price-list:
     get:
       security: [{ apiKey: [] }, { session: [] }]

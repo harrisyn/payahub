@@ -47,7 +47,7 @@ func related(a, b []string) bool {
 type indexed struct {
 	item    Item
 	phrases [][]string // name, generic and each synonym, tokenised
-	numbers []string   // the strength's numbers
+	numbers []string   // the numbers in its strength and name
 }
 
 func indexItem(it Item) indexed {
@@ -57,7 +57,7 @@ func indexItem(it Item) indexed {
 			x.phrases = append(x.phrases, t)
 		}
 	}
-	x.numbers = numbers(tokens(it.Strength))
+	x.numbers = numbers(tokens(it.Strength + " " + it.Name))
 	return x
 }
 
@@ -107,6 +107,21 @@ func numbers(ts []string) []string {
 	return out
 }
 
+// sameStrength reports whether a name's numbers fit an item: every number
+// the name gives is one of the item's ("Mixtard 30/70" fits "insulin
+// biphasic 30/70 100 IU/ml"; "Ceftriaxone 1g" does not fit the 500 mg one).
+func sameStrength(given, item []string) bool {
+	if len(item) == 0 {
+		return true
+	}
+	for _, n := range given {
+		if !slices.Contains(item, n) {
+			return false
+		}
+	}
+	return true
+}
+
 func overlap(a, b []string) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
@@ -145,7 +160,7 @@ func Suggest(name string, kind ItemKind, limit int) []Suggestion {
 			best = max(best, score)
 		}
 		// A different strength is a different item, however close the words.
-		if len(qn) > 0 && len(x.numbers) > 0 && !slices.Equal(qn, x.numbers) {
+		if !sameStrength(qn, x.numbers) {
 			best *= 0.5
 		}
 		if best >= 0.2 {
@@ -192,7 +207,7 @@ func SuggestPayerCodes(payerID, itemID string, limit int) []CodeSuggestion {
 			}
 			best = max(best, score)
 		}
-		if len(e.numbers) > 0 && len(x.numbers) > 0 && !slices.Equal(e.numbers, x.numbers) {
+		if !sameStrength(e.numbers, x.numbers) {
 			best *= 0.5
 		}
 		if best >= 0.2 {
