@@ -46,13 +46,16 @@ func Build(c *claim.Claim, cfg connector.SubmissionConfig) *connector.Submission
 			g.LineIDs = append(g.LineIDs, l.ID)
 			continue
 		}
-		description := l.Description
-		if mapped && l.Mapping.Target.Display != "" && key == code {
-			description = l.Mapping.Target.Display
+		description, payerName := l.Description, ""
+		if mapped {
+			payerName = l.Mapping.Target.Display
+			if payerName != "" && key == code {
+				description = payerName
+			}
 		}
 		index[key] = len(s.Lines)
 		s.Lines = append(s.Lines, connector.SendLine{
-			Key: key, Code: code, Mapped: mapped, Description: description, Category: l.Category,
+			Key: key, Code: code, Mapped: mapped, Description: description, PayerName: payerName, Category: l.Category,
 			Quantity: l.Quantity, Amount: l.Total(), LineIDs: []string{l.ID},
 		})
 	}

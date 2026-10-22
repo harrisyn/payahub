@@ -305,10 +305,10 @@ func (x *XCeli) VerifyMember(ctx context.Context, memberNumber, otp string) (con
 	return v, nil
 }
 
-func (x *XCeli) SendOTP(ctx context.Context, memberNumber string) error {
+func (x *XCeli) SendOTP(ctx context.Context, memberNumber string) (string, error) {
 	_, _, err := x.write(ctx, http.MethodPost, "/api/utilities/generateotp",
 		map[string]any{"MembershipNumber": memberNumber, "ProviderId": x.providerID})
-	return err
+	return "", err
 }
 
 func (x *XCeli) ValidateOTP(ctx context.Context, memberNumber, otp string) error {
@@ -394,22 +394,22 @@ func (x *XCeli) AddLine(ctx context.Context, s *connector.Submission, number str
 	return ref, nil
 }
 
-func (x *XCeli) UpdateLine(ctx context.Context, s *connector.Submission, number, ref string, l connector.SendLine) error {
+func (x *XCeli) UpdateLine(ctx context.Context, s *connector.Submission, number, ref string, l connector.SendLine) (string, error) {
 	id, err := strconv.Atoi(ref)
 	if err != nil {
-		return connector.Errorf(connector.LineNotFound, "XCeli line id %q is not a number", ref)
+		return "", connector.Errorf(connector.LineNotFound, "XCeli line id %q is not a number", ref)
 	}
 	tok, err := x.session(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	body, err := lineBody(s, number, l, tok)
 	if err != nil {
-		return err
+		return "", err
 	}
 	body["ClaimsDetailsId"] = id
 	_, _, err = x.write(ctx, http.MethodPost, "/api/claim/updatehspclaimdetails", body)
-	return err
+	return "", err
 }
 
 func (x *XCeli) DeleteLine(ctx context.Context, _ *connector.Submission, _, ref string) error {

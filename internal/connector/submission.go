@@ -15,6 +15,9 @@ type Submission struct {
 	Claim     *claim.Claim
 	Lines     []SendLine
 	Diagnoses []SendDiagnosis
+	// Sent maps each line's Key to the payer's ref for it. engine.Send fills
+	// it before FinalizeClaim, for payers that finalize line by line.
+	Sent map[string]string
 }
 
 // SendLine is one line on the payer's claim. In grouped mode it carries every
@@ -28,6 +31,8 @@ type SendLine struct {
 	Code        string             `json:"code"`
 	Mapped      bool               `json:"mapped"`
 	Description string             `json:"description"`
+	// PayerName is the payer's own name for the item, when the mapping has it.
+	PayerName string `json:"payer_name,omitempty"`
 	Category    claim.LineCategory `json:"category"`
 	Quantity    int64              `json:"quantity"`
 	Amount      int64              `json:"amount"` // line total, minor units

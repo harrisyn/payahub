@@ -42,7 +42,9 @@ type Connector interface {
 
 	// Member checks.
 	VerifyMember(ctx context.Context, memberNumber, otp string) (MemberVerification, error)
-	SendOTP(ctx context.Context, memberNumber string) error
+	// SendOTP asks the payer to send the member a one-time code. Some payers
+	// return a challenge that must travel with the code on the claim.
+	SendOTP(ctx context.Context, memberNumber string) (challenge string, err error)
 	ValidateOTP(ctx context.Context, memberNumber, otp string) error
 
 	// Whole-claim path: one call carries every line and diagnosis.
@@ -50,8 +52,11 @@ type Connector interface {
 
 	// Incremental path: open, then lines and diagnoses one by one, then finalize.
 	OpenClaim(ctx context.Context, s *Submission) (string, error)
+	// AddLine may return a ref with an error when the payer stored the line
+	// but needs something before it counts (an approval): the ref is kept.
 	AddLine(ctx context.Context, s *Submission, number string, l SendLine) (ref string, err error)
-	UpdateLine(ctx context.Context, s *Submission, number, ref string, l SendLine) error
+	// UpdateLine returns the line's new ref, or "" when it is unchanged.
+	UpdateLine(ctx context.Context, s *Submission, number, ref string, l SendLine) (newRef string, err error)
 	DeleteLine(ctx context.Context, s *Submission, number, ref string) error
 	AddDiagnosis(ctx context.Context, s *Submission, number string, d SendDiagnosis) (ref string, err error)
 	DeleteDiagnosis(ctx context.Context, s *Submission, number, ref string) error
@@ -80,7 +85,7 @@ func (u Unsupported) err(v Verb) error {
 func (u Unsupported) VerifyMember(context.Context, string, string) (MemberVerification, error) {
 	return MemberVerification{}, u.err(VerifyMember)
 }
-func (u Unsupported) SendOTP(context.Context, string) error { return u.err(SendOTP) }
+func (u Unsupported) SendOTP(context.Context, string) (string, error) { return "", u.err(SendOTP) }
 func (u Unsupported) ValidateOTP(context.Context, string, string) error {
 	return u.err(ValidateOTP)
 }
@@ -93,8 +98,8 @@ func (u Unsupported) OpenClaim(context.Context, *Submission) (string, error) {
 func (u Unsupported) AddLine(context.Context, *Submission, string, SendLine) (string, error) {
 	return "", u.err(AddLine)
 }
-func (u Unsupported) UpdateLine(context.Context, *Submission, string, string, SendLine) error {
-	return u.err(UpdateLine)
+func (u Unsupported) UpdateLine(context.Context, *Submission, string, string, SendLine) (string, error) {
+	return "", u.err(UpdateLine)
 }
 func (u Unsupported) DeleteLine(context.Context, *Submission, string, string) error {
 	return u.err(DeleteLine)

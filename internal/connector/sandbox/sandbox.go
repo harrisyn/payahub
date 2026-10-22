@@ -192,18 +192,18 @@ func (Sandbox) AddLine(_ context.Context, _ *connector.Submission, number string
 	return ref, nil
 }
 
-func (Sandbox) UpdateLine(_ context.Context, _ *connector.Submission, number, ref string, l connector.SendLine) error {
+func (Sandbox) UpdateLine(_ context.Context, _ *connector.Submission, number, ref string, l connector.SendLine) (string, error) {
 	payer.Lock()
 	defer payer.Unlock()
 	r, err := openRecord(number)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, ok := r.lines[ref]; !ok {
-		return connector.Errorf(connector.LineNotFound, "no line %s", ref)
+		return "", connector.Errorf(connector.LineNotFound, "no line %s", ref)
 	}
 	r.lines[ref] = connector.PayerLine{Ref: ref, Code: l.Code, Quantity: l.Quantity, Amount: l.Amount}
-	return nil
+	return "", nil
 }
 
 func (Sandbox) DeleteLine(_ context.Context, _ *connector.Submission, number, ref string) error {

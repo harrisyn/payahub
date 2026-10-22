@@ -363,7 +363,7 @@ func TestMemberChecks(t *testing.T) {
 	if v, _ := x.VerifyMember(ctx, "OTP-1", ""); !v.Eligible || !v.OTPRequired {
 		t.Errorf("otp member: %+v", v)
 	}
-	if err := x.SendOTP(ctx, "OTP-1"); err != nil {
+	if _, err := x.SendOTP(ctx, "OTP-1"); err != nil {
 		t.Errorf("send otp: %v", err)
 	}
 	if _, err := x.VerifyMember(ctx, "OTP-1", "0000"); connector.AsError(err).Code != connector.OTPRequired {

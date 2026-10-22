@@ -109,12 +109,25 @@ func Send(ctx context.Context, conn connector.Connector, s *connector.Submission
 		case ok && sent.matches(l):
 			continue
 		case ok:
-			if err := conn.UpdateLine(ctx, s, number, sent.Ref, l); err != nil {
+			ref, err := conn.UpdateLine(ctx, s, number, sent.Ref, l)
+			if ref != "" {
+				sent.Ref = ref
+			}
+			if err != nil {
+				if ref != "" {
+					p.Lines[l.Key] = SentLine{Ref: sent.Ref, Code: sent.Code, Quantity: sent.Quantity, Amount: sent.Amount}
+					_ = record()
+				}
 				return fail(err)
 			}
 		default:
 			ref, err := conn.AddLine(ctx, s, number, l)
 			if err != nil {
+				if ref != "" {
+					// The payer holds the line but needs something first.
+					p.Lines[l.Key] = SentLine{Ref: ref, Code: l.Code, Quantity: l.Quantity, Amount: l.Amount}
+					_ = record()
+				}
 				return fail(err)
 			}
 			sent.Ref = ref
@@ -155,6 +168,10 @@ func Send(ctx context.Context, conn connector.Connector, s *connector.Submission
 		}
 	}
 
+	s.Sent = make(map[string]string, len(p.Lines))
+	for key, sent := range p.Lines {
+		s.Sent[key] = sent.Ref
+	}
 	r, err := conn.FinalizeClaim(ctx, s, number)
 	if r.PayerClaimNumber == "" {
 		r.PayerClaimNumber = number

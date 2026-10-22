@@ -151,6 +151,14 @@ type Input struct {
 	Lines             []Line      `json:"lines"`
 	Diagnoses         []Diagnosis `json:"diagnoses"`
 	AuthorizationCode string      `json:"authorization_code,omitempty"`
+	// OTP is the code the member received, with the challenge the payer
+	// returned when it was sent (some payers need both on the claim).
+	OTP *OTP `json:"otp,omitempty"`
+}
+
+type OTP struct {
+	Code      string `json:"code"`
+	Challenge string `json:"challenge,omitempty"`
 }
 
 type Claim struct {

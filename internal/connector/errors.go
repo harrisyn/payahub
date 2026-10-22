@@ -27,6 +27,9 @@ const (
 	Timeout               ErrorCode = "timeout"
 	Connection            ErrorCode = "connection"
 	PayerRefused          ErrorCode = "payer_refused"
+	// AwaitingPayer means the payer must act first (approve a line, say).
+	// The claim stays submitted and the queue checks again with backoff.
+	AwaitingPayer ErrorCode = "awaiting_payer"
 	Unknown               ErrorCode = "unknown"
 )
 
@@ -49,7 +52,7 @@ func (e *Error) Unwrap() error { return e.Cause }
 // Retryable errors are transport failures: the payer may or may not have
 // received the request, so the worker reconciles before resending.
 func (e *Error) Retryable() bool {
-	return e.Code == Timeout || e.Code == Connection || e.Code == Unknown
+	return e.Code == Timeout || e.Code == Connection || e.Code == Unknown || e.Code == AwaitingPayer
 }
 
 // Final errors mean the payer decided against this claim; retrying will not help.
