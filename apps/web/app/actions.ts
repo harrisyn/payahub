@@ -352,3 +352,75 @@ export async function loadPayerList(_: ListState, form: FormData): Promise<ListS
   revalidatePath("/console/operator", "layout");
   return { ok: `${res.data.entries.toLocaleString("en-GB")} codes loaded. This replaces the earlier list.`, skipped: res.data.skipped };
 }
+
+// Price list. The file goes to the API as base64; prices are typed in major
+// units here and sent in minor units.
+
+export type ImportState = FormState & {
+  skipped?: { line: number; reason: string }[];
+  changes?: { added: number; changed: number; unchanged: number; removed: number };
+};
+
+export async function importPrices(_: ImportState, form: FormData): Promise<ImportState> {
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV or Excel file." };
+  if (file.size > 16 << 20) return { error: "The file is over 16 MB. Split it and import each part." };
+  const res = await api<{ rows: number; skipped: { line: number; reason: string }[]; changes: ImportState["changes"] }>(
+    "/v1/price-list/import",
+    {
+      method: "POST",
+      body: {
+        file: Buffer.from(await file.arrayBuffer()).toString("base64"),
+        mode: text(form, "mode") === "replace" ? "replace" : "merge",
+        currency: text(form, "currency") || "GHS",
+      },
+    },
+  );
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console", "layout");
+  return { ok: `${res.data.rows.toLocaleString("en-GB")} prices read.`, skipped: res.data.skipped, changes: res.data.changes };
+}
+
+export async function addPrice(_: FormState, form: FormData): Promise<FormState> {
+  const price = Number(text(form, "price").replace(/,/g, ""));
+  if (!Number.isFinite(price) || price < 0 || text(form, "price") === "") return { error: "Enter the price, like 45.00." };
+  const res = await api("/v1/price-list", {
+    method: "PUT",
+    body: {
+      prices: [
+        {
+          local_code: text(form, "code"),
+          name: text(form, "name"),
+          kind: text(form, "kind"),
+          unit_price: Math.round(price * 100),
+          currency: text(form, "currency") || "GHS",
+        },
+      ],
+    },
+  });
+  if (!res.ok) {
+    const details = res.error.details as Record<string, string> | undefined;
+    return { error: details ? `This line has ${Object.values(details).join(", ")}.` : res.error.message };
+  }
+  revalidatePath("/console", "layout");
+  return { ok: "Saved." };
+}
+
+export async function deletePrice(form: FormData) {
+  await api(`/v1/price-list/${encodeURIComponent(text(form, "code"))}`, { method: "DELETE" });
+  revalidatePath("/console", "layout");
+}
+
+// confirmItems saves the standard item for one or more of the price list's
+// codes, as a person's confirmation.
+export async function confirmItems(form: FormData) {
+  const mappings = form.getAll("pick").map((v) => {
+    const [local_code, item_id, ...name] = String(v).split("\u001f");
+    return { local_code, item_id, local_name: name.join("") };
+  });
+  for (let i = 0; i < mappings.length; i += 500) {
+    const res = await api("/v1/item-mappings", { method: "PUT", body: { mappings: mappings.slice(i, i + 500) } });
+    if (!res.ok) break;
+  }
+  revalidatePath("/console", "layout");
+}

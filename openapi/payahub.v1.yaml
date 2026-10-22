@@ -472,6 +472,87 @@ paths:
         "202": { description: Queued }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/price-list:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: The organisation's price list, with each code's confirmed standard item or a suggested one
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Price" } }
+                  mapped: { type: integer }
+    put:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Add or update prices; codes not sent are left as they are
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prices]
+              properties:
+                prices:
+                  type: array
+                  maxItems: 50000
+                  items:
+                    type: object
+                    required: [local_code, name, unit_price]
+                    properties:
+                      local_code: { type: string, maxLength: 64 }
+                      name: { type: string, maxLength: 300 }
+                      kind: { enum: [service, lab, imaging, procedure, medication, consumable] }
+                      unit_price: { type: integer, minimum: 0, description: Minor units }
+                      currency: { type: string, default: GHS }
+      responses:
+        "200": { description: Saved, content: { application/json: { schema: { $ref: "#/components/schemas/PriceChanges" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/price-list/import:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Import a CSV or Excel price list
+      description: |
+        The header row (within the first 10 rows) needs a code, a name and a price column; a category
+        column sets the kind. `merge` adds and updates; `replace` also removes codes the file does not
+        have. Unreadable rows are skipped and listed. With `dry_run` nothing is saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: byte, description: The .csv or .xlsx file, base64 }
+                mode: { enum: [merge, replace], default: merge }
+                currency: { type: string, default: GHS }
+                dry_run: { type: boolean }
+      responses:
+        "200":
+          description: Read (and saved unless dry_run)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows: { type: integer }
+                  skipped: { type: array, items: { type: object, properties: { line: { type: integer }, reason: { type: string } } } }
+                  dry_run: { type: boolean }
+                  changes: { $ref: "#/components/schemas/PriceChanges" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/price-list/{code}:
+    delete:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Remove a price
+      parameters: [{ name: code, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/operator/payers:
     get:
       security: [{ session: [] }]
@@ -710,10 +791,12 @@ components:
           type: array
           items:
             type: object
-            required: [description, unit_price]
+            description: |
+              A line with the organisation's own code that is on its price list may leave out
+              `description` and `unit_price`: both come from the list (an explicit 0 stays 0).
             properties:
               id: { type: string }
-              description: { type: string }
+              description: { type: string, description: Required unless the code is on the price list }
               category: { enum: [service, procedure, drug, consumable] }
               code:
                 $ref: "#/components/schemas/Code"
@@ -725,7 +808,8 @@ components:
                 $ref: "#/components/schemas/CodeMapping"
                 description: The payer's code. Filled in from the standard item; send it only to override.
               quantity: { type: integer, minimum: 1, default: 1 }
-              unit_price: { type: integer, minimum: 0, description: Minor units }
+              unit_price: { type: integer, minimum: 0, description: Minor units. Left out, the price list's price is used }
+              price_from: { enum: [price_list], description: Set by Payahub when the price came from the price list }
               service_date: { type: string, format: date }
               prescription:
                 type: object
@@ -824,6 +908,24 @@ components:
         check_message: { type: string }
         updated_at: { type: string, format: date-time }
     ItemKind: { enum: [service, lab, imaging, procedure, medication, consumable] }
+    Price:
+      type: object
+      properties:
+        local_code: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        unit_price: { type: integer, description: Minor units }
+        currency: { type: string }
+        item_id: { type: string, description: The confirmed standard item }
+        suggestion: { type: object, description: A standard item that may match, when none is confirmed }
+        updated_at: { type: string, format: date-time }
+    PriceChanges:
+      type: object
+      properties:
+        added: { type: integer }
+        changed: { type: integer }
+        unchanged: { type: integer }
+        removed: { type: integer }
     OperatorPayer:
       allOf:
         - { $ref: "#/components/schemas/Payer" }

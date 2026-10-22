@@ -112,11 +112,14 @@ type Line struct {
 	// item ({"system": "payahub", "value": "MED-0001"}).
 	Code *Code `json:"code,omitempty"`
 	// Item is the standard item the line resolved to.
-	Item        string       `json:"item,omitempty"`
-	Mapping     *CodeMapping `json:"mapping,omitempty"`
-	Quantity    int64        `json:"quantity"`
-	UnitPrice   int64        `json:"unit_price"` // minor units
-	ServiceDate *Date        `json:"service_date,omitempty"`
+	Item      string       `json:"item,omitempty"`
+	Mapping   *CodeMapping `json:"mapping,omitempty"`
+	Quantity  int64        `json:"quantity"`
+	UnitPrice int64        `json:"unit_price"` // minor units
+	// PriceFrom is "price_list" when the line gave no price and took the
+	// organisation's price for its code.
+	PriceFrom   string `json:"price_from,omitempty"`
+	ServiceDate *Date  `json:"service_date,omitempty"`
 	// Prescription is how a drug line was prescribed. Some payers (SmartClaims)
 	// refuse a medicine without it.
 	Prescription *Prescription `json:"prescription,omitempty"`

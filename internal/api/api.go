@@ -42,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 	s.catalogRoutes(mux)
 	s.consoleRoutes(mux)
 	s.operatorRoutes(mux)
+	s.priceRoutes(mux)
 	return mux
 }
 
@@ -102,7 +103,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 // readInput decodes a claim request strictly (unknown fields rejected) and
 // returns the raw bytes' hash for idempotency checks.
-func readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bool) {
+func (s *Server) readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bool) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body is over 1 MiB.", nil)
@@ -116,6 +117,10 @@ func readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bo
 		return nil, nil, false
 	}
 	in.Normalize(func() string { return store.NewID("ln") })
+	if err := s.applyPriceList(r.Context(), orgFrom(r.Context()).ID, &in, raw); err != nil {
+		s.internal(w, r, err)
+		return nil, nil, false
+	}
 	if errs := in.Check(); len(errs) > 0 {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_claim", "The claim has missing or invalid fields.", errs)
 		return nil, nil, false
@@ -126,6 +131,53 @@ func readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bo
 	}
 	sum := sha256.Sum256(raw)
 	return &in, sum[:], true
+}
+
+// applyPriceList completes lines that name one of the organisation's own
+// codes from its price list: the price when the line gives none (an explicit
+// 0 stays 0) and the description when it is empty. A price in another
+// currency than the claim's is never used.
+func (s *Server) applyPriceList(ctx context.Context, orgID string, in *claim.Input, raw []byte) error {
+	var given struct {
+		Lines []struct {
+			UnitPrice json.RawMessage `json:"unit_price"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(raw, &given); err != nil {
+		return nil // the strict decode above already accepted it; nothing to add
+	}
+	var codes []string
+	for i := range in.Lines {
+		in.Lines[i].PriceFrom = ""
+		if l := in.Lines[i]; l.Code != nil && l.Code.System != catalog.System && l.Code.Value != "" {
+			codes = append(codes, l.Code.Value)
+		}
+	}
+	if len(codes) == 0 {
+		return nil
+	}
+	prices, err := store.PricesFor(ctx, s.Store.Pool, orgID, codes)
+	if err != nil || len(prices) == 0 {
+		return err
+	}
+	for i := range in.Lines {
+		l := &in.Lines[i]
+		if l.Code == nil || l.Code.System == catalog.System {
+			continue
+		}
+		p, ok := prices[l.Code.Value]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(l.Description) == "" {
+			l.Description = p.Name
+		}
+		if i < len(given.Lines) && given.Lines[i].UnitPrice == nil && p.Currency == in.Currency {
+			l.UnitPrice = p.UnitPrice
+			l.PriceFrom = "price_list"
+		}
+	}
+	return nil
 }
 
 func newClaim(org store.Org, in *claim.Input, sha []byte) *claim.Claim {
@@ -154,7 +206,7 @@ func hexString(b []byte) string {
 }
 
 func (s *Server) createClaim(w http.ResponseWriter, r *http.Request) {
-	in, sha, ok := readInput(w, r)
+	in, sha, ok := s.readInput(w, r)
 	if !ok {
 		return
 	}
@@ -182,7 +234,7 @@ func (s *Server) createClaim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) validateClaim(w http.ResponseWriter, r *http.Request) {
-	in, sha, ok := readInput(w, r)
+	in, sha, ok := s.readInput(w, r)
 	if !ok {
 		return
 	}

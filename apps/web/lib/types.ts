@@ -163,3 +163,14 @@ export type CatalogChange = {
   changed_by: string;
   changed_at: string;
 };
+
+export type Price = {
+  local_code: string;
+  name: string;
+  kind?: ItemKind;
+  unit_price: number;
+  currency: string;
+  item_id?: string;
+  updated_at: string;
+  suggestion?: Suggestion;
+};

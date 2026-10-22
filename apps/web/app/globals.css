@@ -726,12 +726,20 @@ a.app-id { color: var(--text); }
 .app-trail__item--acknowledged .app-step__title { color: var(--positive); }
 .app-trail__item--rejected .app-step__title, .app-trail__item--validation_failed .app-step__title { color: #a3141b; }
 .app-trail__item--attempt_failed .app-step__title { color: #92400e; }
+/* price list */
+.app-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 8px; border-radius: 8px; background: #F1F0FE; }
+.app-button--small { min-height: 30px; padding: 4px 10px; font-size: 13px; }
+.app-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.show-sm-inline { display: none; }
+.app-nowrap { white-space: nowrap; }
+
 /* operator catalogue */
 .app-narrow { max-width: 760px; }
 .app-strong-link { font-weight: 600; color: var(--text); }
 .app-tnum { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .app-pad-y { padding: 12px 0; }
-.app-form__row { align-items: start; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px 16px; }
+.app-form__row { align-items: start; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 14px 16px; }
+.app-form__row .field input, .app-form__row .field select { width: 100%; min-width: 0; }
 .app-textarea--short { min-height: 72px; }
 .app-details summary { cursor: pointer; color: var(--a-muted); font-weight: 500; }
 .app-details[open] summary { margin-bottom: 10px; }
@@ -770,6 +778,14 @@ a.app-id { color: var(--text); }
   .app-trail__item { grid-template-columns: 1fr; gap: 2px; }
   .hide-sm { display: none; }
   .show-sm { display: block; }
+  .show-sm-inline { display: inline; }
+  .app-prices { display: table; }
+  .app-prices thead { display: none; }
+  .app-prices tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 8px; border-top: 1px solid var(--rule); padding: 12px 0; }
+  .app-prices td { border: 0; padding: 0; }
+  .app-prices td:nth-child(4) { grid-column: 1 / 2; }
+  .app-prices td:nth-child(5) { align-self: end; }
+  .app-confirm { flex-wrap: wrap; }
   .app-table td.num { white-space: nowrap; }
   .app-codecell { width: auto; }
   .app-tabs { overflow-x: auto; white-space: nowrap; gap: 18px; }
