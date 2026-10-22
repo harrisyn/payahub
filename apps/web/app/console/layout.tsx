@@ -17,11 +17,8 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
     <div className="app">
       <aside className="app-side">
         <Link href="/console" className="app-brand">
-          <svg className="app-brand__mark" viewBox="0 0 32 32" aria-hidden="true">
-            <rect width="32" height="32" rx="7" fill="#6bb4ee" />
-            <path d="M9 9h10a6 6 0 0 1 0 12h-6v4H9z" fill="#0e1822" />
-            <path d="M13 13h5.5a2 2 0 0 1 0 4H13z" fill="#ff5a1f" />
-          </svg>
+          {/* The small symbol: below 48px the spider keeps a hub dot, not the arrows. */}
+          <img className="app-brand__mark" src="/brand/payahub-symbol-small-color.svg" alt="" width={30} height={30} />
           <span>
             <span className="app-brand__name">{site.name}</span>
             <span className="app-brand__org">{org.name}</span>

@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { HeroSlot, Pricing, ProofNames, Reveal, SandboxTry, Switches } from "@/components/landing";
+import { Logo } from "@/components/logo";
 import { plans, TRIAL_DAYS, TRIAL_LIVE_CLAIMS } from "@/lib/pricing";
 
 import { site } from "./site";
@@ -70,6 +71,7 @@ const jsonLd = [
     operatingSystem: "Web",
     description: site.description,
     url: site.url,
+    image: `${site.url}/brand/symbol-color-1024.png`,
     offers: plans
       .filter((p) => p.monthlyFee !== null || p.perClaim !== null)
       .map((p) => ({
@@ -113,8 +115,8 @@ export default function Home() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
 
       <header className="nav wrap" id="top">
-        <Link href="/" className="wordmark">
-          {site.name}
+        <Link href="/" className="nav__brand" aria-label={`${site.name} home`}>
+          <Logo />
         </Link>
         <nav aria-label="Main" className="nav__links">
           <a href="#how">How it works</a>
@@ -261,7 +263,7 @@ export default function Home() {
                 src="/console/first-claim-steps.png"
                 alt="The five onboarding steps, all ticked: account, how you bill, insurers, a first claim, plan."
                 width={1304}
-                height={864}
+                height={1006}
                 sizes="(max-width: 64em) 100vw, 34vw"
               />
               <figcaption>Five steps from sign-up to a live claim.</figcaption>
@@ -281,7 +283,7 @@ export default function Home() {
                 src="/console/insurer-credentials.png"
                 alt="XCeli's settings: credentials saved and sealed, a connection check, and what the insurer supports."
                 width={1888}
-                height={1314}
+                height={936}
                 sizes="(max-width: 64em) 100vw, 58vw"
               />
               <figcaption>Insurer credentials, sealed as they are saved.</figcaption>
@@ -377,7 +379,7 @@ export default function Home() {
       <footer className="footer">
         <div className="wrap footer__top">
           <p className="footer__notes">
-            <span className="wordmark">{site.name}</span> One API for insurance claims, built in {site.city}.
+            <Logo className="logo logo--foot" /> One API for insurance claims, built in {site.city}.
           </p>
           <a href="#top" className="link">
             Back to top
