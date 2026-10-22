@@ -18,6 +18,9 @@ type Submission struct {
 	// Sent maps each line's Key to the payer's ref for it. engine.Send fills
 	// it before FinalizeClaim, for payers that finalize line by line.
 	Sent map[string]string
+	// Renewal is 0 for the first payer claim, and counts the claims opened
+	// again after the payer let one expire.
+	Renewal int
 }
 
 // SendLine is one line on the payer's claim. In grouped mode it carries every

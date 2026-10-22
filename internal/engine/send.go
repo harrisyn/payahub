@@ -19,7 +19,13 @@ type Progress struct {
 	PayerClaimNumber string              `json:"payer_claim_number,omitempty"`
 	Lines            map[string]SentLine `json:"lines,omitempty"`     // by SendLine.Key
 	Diagnoses        map[string]string   `json:"diagnoses,omitempty"` // ICD-10 code -> payer ref
+	// Renewals counts claims opened again because the payer let the last
+	// one expire before it was finished.
+	Renewals int `json:"renewals,omitempty"`
 }
+
+// MaxRenewals bounds how often an expired payer claim is opened again.
+const MaxRenewals = 3
 
 type SentLine struct {
 	Ref      string `json:"ref"`
@@ -42,10 +48,29 @@ type Journal func(context.Context, *Progress) error
 // journal, and on a resumed send first reads the payer's copy (FetchClaim) to
 // adopt any line whose add reached the payer but whose reply was lost, and to
 // notice a claim the payer already has as submitted.
+//
+// A payer that lets an open claim expire (RX: "Life Span of Claim has
+// Expired") answers ClaimExpired; the claim is then opened again, up to
+// MaxRenewals times, with Submission.Renewal telling the connector to make
+// the new claim distinct.
 func Send(ctx context.Context, conn connector.Connector, s *connector.Submission, plan Plan, p *Progress, journal Journal) (connector.Receipt, error) {
 	if plan.WholeClaim() {
 		return conn.SubmitWholeClaim(ctx, s)
 	}
+	for {
+		s.Renewal = p.Renewals
+		r, err := sendLines(ctx, conn, s, p, journal)
+		if !isCode(err, connector.ClaimExpired) || p.PayerClaimNumber == "" || p.Renewals >= MaxRenewals {
+			return r, err
+		}
+		*p = Progress{Renewals: p.Renewals + 1}
+		if err := journal(ctx, p); err != nil {
+			return connector.Receipt{}, connector.Errorf(connector.Connection, "recording progress: %v", err)
+		}
+	}
+}
+
+func sendLines(ctx context.Context, conn connector.Connector, s *connector.Submission, p *Progress, journal Journal) (connector.Receipt, error) {
 	if p.Lines == nil {
 		p.Lines = map[string]SentLine{}
 	}
