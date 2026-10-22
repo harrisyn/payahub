@@ -111,7 +111,7 @@ func Suggest(name string, kind ItemKind, limit int) []Suggestion {
 	}
 	qn := numbers(q)
 	var out []Suggestion
-	for _, x := range std.index {
+	for _, x := range get().index {
 		if kind != "" && x.item.Kind != kind {
 			continue
 		}
@@ -137,6 +137,48 @@ func Suggest(name string, kind ItemKind, limit int) []Suggestion {
 	}
 	if out == nil {
 		out = []Suggestion{}
+	}
+	return out
+}
+
+// CodeSuggestion is an entry of a payer's list that may be its code for a
+// standard item. An operator confirms it before it is used.
+type CodeSuggestion struct {
+	ListEntry
+	Confidence float64 `json:"confidence"`
+}
+
+// SuggestPayerCodes ranks the payer's own list entries for a standard item
+// by the same word matching as Suggest: any phrase of the item (name, generic
+// name, synonyms) against the entry's name, a different strength halving the
+// score.
+func SuggestPayerCodes(payerID, itemID string, limit int) []CodeSuggestion {
+	c := get()
+	it, ok := c.byItem[itemID]
+	if !ok {
+		return []CodeSuggestion{}
+	}
+	x := indexItem(it)
+	out := []CodeSuggestion{}
+	for _, e := range c.lists[payerID] {
+		best := 0.0
+		for _, p := range x.phrases {
+			score := overlap(e.words, p)
+			if slices.Equal(e.words, p) {
+				score = 0.97
+			}
+			best = max(best, score)
+		}
+		if len(e.numbers) > 0 && len(x.numbers) > 0 && !slices.Equal(e.numbers, x.numbers) {
+			best *= 0.5
+		}
+		if best >= 0.2 {
+			out = append(out, CodeSuggestion{ListEntry: e.entry, Confidence: float64(int(best*100)) / 100})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Confidence > out[j].Confidence })
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out
 }

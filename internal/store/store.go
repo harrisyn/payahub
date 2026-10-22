@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,11 @@ type Store struct {
 	// keys caches API key and session lookups for keyTTL, so a revoked key
 	// stops working within that window without a database read per request.
 	keys sync.Map // sha256 string -> cachedKey
+
+	// catalogVersion is the catalog_changes id the in-memory catalogue was
+	// built from; -1 before the first load.
+	catalogVersion atomic.Int64
+	catalogMu      sync.Mutex
 }
 
 const keyTTL = 30 * time.Second
@@ -69,7 +75,9 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return &Store{Pool: pool}, nil
+	st := &Store{Pool: pool}
+	st.catalogVersion.Store(-1)
+	return st, nil
 }
 
 func (s *Store) Close() { s.Pool.Close() }
@@ -94,8 +102,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
-	return err
+	if _, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
+		return err
+	}
+	return s.SeedCatalog(ctx)
 }
 
 func NewID(prefix string) string { return prefix + "_" + uuid.Must(uuid.NewV7()).String() }
@@ -109,6 +119,8 @@ type Org struct {
 	Environment string
 	Session     bool
 	UserID      string
+	// Operator users run Payahub itself: they edit the shared catalogue.
+	Operator bool
 }
 
 // Authenticate resolves an API key or a console session token.

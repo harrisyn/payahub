@@ -4,6 +4,7 @@
 //	payahub api       serve the /v1 API (inserts jobs, works none)
 //	payahub worker    work submission jobs
 //	payahub dev       migrate, seed the sandbox key, then api + worker in one process
+//	payahub operator EMAIL [off]  let a console user edit the shared catalogue (or stop them)
 //
 // Configuration is by environment: DATABASE_URL, PAYAHUB_ADDR (default :8080),
 // PAYAHUB_WORKERS (concurrent submissions per worker process, default 100),
@@ -35,7 +36,7 @@ const sandboxKey = "sk_sandbox_dev"
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: payahub migrate|api|worker|dev")
+		fmt.Fprintln(os.Stderr, "usage: payahub migrate|api|worker|dev|operator")
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -64,6 +65,17 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	if cmd == "migrate" {
 		return st.Migrate(ctx)
 	}
+	if cmd == "operator" {
+		if len(os.Args) < 3 {
+			return errors.New("usage: payahub operator EMAIL [off]")
+		}
+		on := !(len(os.Args) > 3 && os.Args[3] == "off")
+		if err := st.SetOperator(ctx, os.Args[2], on); err != nil {
+			return fmt.Errorf("%s: %w", os.Args[2], err)
+		}
+		logger.Info("operator updated", "email", os.Args[2], "operator", on)
+		return nil
+	}
 	key := os.Getenv("PAYAHUB_VAULT_KEY")
 	if key == "" && cmd == "dev" {
 		key = vault.NewKey()
@@ -73,6 +85,12 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("PAYAHUB_VAULT_KEY: %w", err)
 	}
+	// The shared catalogue lives in the database; every process loads it now
+	// and picks up operators' changes within a few seconds.
+	if err := st.RefreshCatalog(ctx); err != nil && cmd != "dev" {
+		return fmt.Errorf("loading the catalogue (run payahub migrate first): %w", err)
+	}
+	go st.WatchCatalog(ctx, 5*time.Second, func(err error) { logger.Warn("catalogue refresh failed", "err", err) })
 	switch cmd {
 	case "api":
 		return serve(ctx, st, v, 0, logger)
@@ -80,6 +98,9 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 		return work(ctx, st, v, workers, logger)
 	case "dev":
 		if err := st.Migrate(ctx); err != nil {
+			return err
+		}
+		if err := st.RefreshCatalog(ctx); err != nil {
 			return err
 		}
 		if err := st.EnsureOrgWithKey(ctx, "org_sandbox", "Sandbox organisation", "sandbox", sandboxKey); err != nil {

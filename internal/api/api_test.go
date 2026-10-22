@@ -56,6 +56,9 @@ func setup(t testing.TB) env {
 		if setupErr = st.Migrate(ctx); setupErr != nil {
 			return
 		}
+		if setupErr = st.RefreshCatalog(ctx); setupErr != nil {
+			return
+		}
 		v, err := vault.New(vault.NewKey())
 		if setupErr = err; err != nil {
 			return

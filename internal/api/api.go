@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/claims/{id}/submit", s.auth(s.submitClaim))
 	s.catalogRoutes(mux)
 	s.consoleRoutes(mux)
+	s.operatorRoutes(mux)
 	return mux
 }
 
@@ -119,7 +120,7 @@ func readInput(w http.ResponseWriter, r *http.Request) (*claim.Input, []byte, bo
 		writeError(w, http.StatusUnprocessableEntity, "invalid_claim", "The claim has missing or invalid fields.", errs)
 		return nil, nil, false
 	}
-	if _, ok := catalog.LookupPayer(in.PayerID); !ok {
+	if p, ok := catalog.LookupPayer(in.PayerID); !ok || p.Inactive {
 		writeError(w, http.StatusUnprocessableEntity, "unknown_payer", "No payer '"+in.PayerID+"' in the catalogue. See GET /v1/payers.", nil)
 		return nil, nil, false
 	}
