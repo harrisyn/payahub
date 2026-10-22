@@ -47,7 +47,7 @@ export function IntakeVisual() {
   const [ref, i] = useLoop(incoming.length, 1800);
   const c = incoming[i];
   return (
-    <div ref={ref} className="viz viz--intake" aria-hidden="true">
+    <div ref={ref} className="viz viz--intake" aria-hidden="true" data-ui>
       <div className="viz__chips">
         {methods.map((m, n) => (
           <span key={m.name} className={`viz__chip ${n === 0 ? "is-on" : ""}`}>
@@ -58,7 +58,7 @@ export function IntakeVisual() {
       </div>
       <div className="viz__card" key={i}>
         <div className="viz__row">
-          <span className="viz__mono">POST /v1/claims</span>
+          <code className="viz__code">POST /v1/claims</code>
           <span className="viz__status viz__status--ok">202 Accepted</span>
         </div>
         <div className="viz__row">
@@ -67,7 +67,7 @@ export function IntakeVisual() {
         </div>
         <div className="viz__row">
           <span className="viz__muted">To {c.payer}</span>
-          <span className="viz__mono viz__muted">{c.id}…</span>
+          <code className="viz__code viz__muted">{c.id}…</code>
         </div>
       </div>
     </div>
@@ -84,7 +84,7 @@ const coding = [
 export function CodingVisual() {
   const [ref, i] = useLoop(coding.length + 1, 1300);
   return (
-    <div ref={ref} className="viz viz--coding" aria-hidden="true">
+    <div ref={ref} className="viz viz--coding" aria-hidden="true" data-ui>
       {coding.map((c, n) => (
         <div key={c.label} className={`viz__map ${n <= i ? "is-on" : ""}`}>
           <span className="viz__muted">{c.label}</span>
@@ -93,9 +93,9 @@ export function CodingVisual() {
         </div>
       ))}
       <div className={`viz__checks ${i >= coding.length ? "is-on" : ""}`}>
-        <span>✓ Member eligible</span>
-        <span>✓ ICD-10 B54 valid</span>
-        <span>✓ Price on list</span>
+        <span>Member eligible</span>
+        <span>ICD-10 B54 valid</span>
+        <span>Price on list</span>
       </div>
     </div>
   );
@@ -113,7 +113,7 @@ const trail = [
 export function DeliveryVisual() {
   const [ref, i] = useLoop(trail.length + 2, 1000);
   return (
-    <div ref={ref} className="viz viz--trail" aria-hidden="true">
+    <div ref={ref} className="viz viz--trail" aria-hidden="true" data-ui>
       <ol className="viz__trail">
         {trail.map((t, n) => (
           <li key={t.what} className={`viz__step viz__step--${t.tone || "plain"} ${n <= i ? "is-on" : ""}`}>
@@ -138,7 +138,7 @@ const fields = [
 export function ReviewVisual() {
   const [ref, i] = useLoop(fields.length + 2, 900);
   return (
-    <div ref={ref} className="ai-card" aria-hidden="true">
+    <div ref={ref} className="ai-card" aria-hidden="true" data-ui>
       <div className="ai-card__head">
         <span className="ai-card__file">claim-form-0193.jpg</span>
         <span className="ai-card__bar-note">Bar: 95%</span>

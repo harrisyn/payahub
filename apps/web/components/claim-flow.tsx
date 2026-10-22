@@ -267,16 +267,6 @@ function Diagram({ g, live }: { g: Geometry; live: boolean }) {
       style={{ aspectRatio: `${g.w} / ${g.h}` }}
     >
       <svg className="flow__wires" viewBox={`0 0 ${g.w} ${g.h}`} aria-hidden="true">
-        <defs>
-          <linearGradient id={`wire-in-${g.vertical ? "t" : "w"}`} x1="0" x2={g.vertical ? "0" : "1"} y1="0" y2={g.vertical ? "1" : "0"}>
-            <stop offset="0" stopColor="#8C8EFF" stopOpacity="0.15" />
-            <stop offset="1" stopColor="#8C8EFF" stopOpacity="0.7" />
-          </linearGradient>
-          <linearGradient id={`wire-out-${g.vertical ? "t" : "w"}`} x1="0" x2={g.vertical ? "0" : "1"} y1="0" y2={g.vertical ? "1" : "0"}>
-            <stop offset="0" stopColor="#8C8EFF" stopOpacity="0.7" />
-            <stop offset="1" stopColor="#7BE0B0" stopOpacity="0.35" />
-          </linearGradient>
-        </defs>
         {g.sources.map((_, i) => (
           <path
             key={`i${i}`}
@@ -284,8 +274,7 @@ function Diagram({ g, live }: { g: Geometry; live: boolean }) {
               inPaths.current[i] = el;
             }}
             d={inbound(g, i)}
-            className="flow__wire"
-            stroke={`url(#wire-in-${g.vertical ? "t" : "w"})`}
+            className="flow__wire flow__wire--in"
           />
         ))}
         {g.payers.map((_, j) => (
@@ -295,8 +284,7 @@ function Diagram({ g, live }: { g: Geometry; live: boolean }) {
               outPaths.current[j] = el;
             }}
             d={outbound(g, j)}
-            className="flow__wire"
-            stroke={`url(#wire-out-${g.vertical ? "t" : "w"})`}
+            className="flow__wire flow__wire--out"
           />
         ))}
         <g ref={layer} />
@@ -357,7 +345,7 @@ function Diagram({ g, live }: { g: Geometry; live: boolean }) {
         <ol className="flow__feed" aria-hidden="true" data-title="Sample claims">
           {(arrivals.length ? arrivals : [{ id: 0, claim: 0, payer: 0 }]).map((a) => (
             <li key={a.id} className="flow__feed-row">
-              <span className="flow__feed-tick">✓</span>
+              <span className="flow__feed-tick" />
               <span className="flow__feed-text">
                 <strong>{claims[a.claim].clinic}</strong> · {claims[a.claim].amount} to {payers[a.payer].label}
               </span>
@@ -374,7 +362,7 @@ export function ClaimFlow() {
   const [live, setLive] = useState(false);
   useEffect(() => setLive(true), []);
   return (
-    <figure className="flow-figure">
+    <figure className="flow-figure" data-ui>
       <Diagram g={wide} live={live} />
       <Diagram g={tall} live={live} />
       <figcaption className="sr-only">

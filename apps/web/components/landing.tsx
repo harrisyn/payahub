@@ -44,7 +44,7 @@ export function SandboxTry() {
     };
   }, [value]);
   return (
-    <div className="lp-try-card">
+    <div className="lp-try-card" data-ui>
       <div className="lp-try-card__input">
         <label htmlFor={id}>Member number</label>
         <input
@@ -100,7 +100,7 @@ export function Pricing() {
   const cost = monthlyCost(plan, claims);
   const sliderId = useId();
   return (
-    <div className="lp-plans">
+    <div className="lp-plans" data-ui>
       <div className="lp-plans__tabs" role="tablist" aria-label="Plans">
         {plans.map((p, i) => (
           <button

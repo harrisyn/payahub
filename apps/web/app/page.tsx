@@ -106,19 +106,16 @@ const platforms = ["XCeli", "Medserve", "SmartClaims", "RX Insurance", "ClaimIQ"
 
 const steps = [
   {
-    n: "01",
     title: "Send claims the way you bill",
     text: "One request per claim from your hospital system, in one shape for every insurer. Spreadsheet, scanned-form and web-form routes are on the way for clinics without developers.",
     visual: <IntakeVisual />,
   },
   {
-    n: "02",
     title: "We code and check each line",
     text: "Your own codes are matched to a standard list once, and each insurer's code follows from it. Member, diagnosis, price and totals are checked before anything leaves.",
     visual: <CodingVisual />,
   },
   {
-    n: "03",
     title: "Delivered, retried, on record",
     text: "Claims go out through a durable queue. A timeout is retried only after asking the insurer whether it already has the claim, so nothing is lost or sent twice.",
     visual: <DeliveryVisual />,
@@ -129,7 +126,6 @@ const guarantees = [
   {
     title: "Never lost",
     text: "A claim and the job that sends it are saved in one transaction. A crash, a restart or a slow insurer cannot drop it.",
-    big: true,
   },
   { title: "Never sent twice", text: "Before every retry we ask the insurer for the claim. Idempotency keys stop duplicate requests at the door." },
   { title: "Credentials sealed", text: "Insurer passwords are sealed with AES-256 the moment they are saved. No screen or endpoint returns them." },
@@ -170,18 +166,13 @@ export default function Home() {
 
       <main id="main">
         <section className="lp-hero" aria-labelledby="hero-h">
-          <div className="lp-hero__glow" aria-hidden="true" />
           <div className="lp-wrap lp-hero__copy">
-            <p className="lp-hero__badge">
-              <span className="lp-hero__badge-dot" aria-hidden="true" />
-              Insurance claims for clinics in Ghana
-            </p>
             <h1 id="hero-h" className="lp-hero__title">
-              Every claim, to <span className="lp-grad">every insurer</span>, through one hub.
+              Every claim, every insurer, one hub.
             </h1>
             <p className="lp-hero__lead">
-              {site.name} takes the claims your clinic already makes, codes each line for the insurer, checks it
-              before it leaves and tracks it to acknowledgement. One API, no portal logins, no claim lost.
+              {site.name} sends your clinic&apos;s insurance claims to every insurer you work with in Ghana. It codes
+              each line, checks it before it leaves and tracks it to acknowledgement. No portal logins, no claim lost.
             </p>
             <div className="lp-hero__actions">
               <Link href="/start" className="lp-btn lp-btn--primary lp-btn--lg">
@@ -192,7 +183,7 @@ export default function Home() {
               </a>
             </div>
             <p className="lp-hero__fine">
-              {TRIAL_DAYS} days and {TRIAL_LIVE_CLAIMS} live claims free · no card · sandbox key on sign-up
+              {TRIAL_DAYS} days and {TRIAL_LIVE_CLAIMS} live claims free, no card, sandbox key on sign-up.
             </p>
           </div>
           <div className="lp-wrap lp-hero__visual">
@@ -216,7 +207,6 @@ export default function Home() {
         <section className="lp-section lp-problem" aria-labelledby="problem-h">
           <div className="lp-wrap">
             <div className="lp-head" data-reveal>
-              <p className="lp-eyebrow">Why clinics switch</p>
               <h2 id="problem-h" className="lp-h2">
                 Month-end should not take a month.
               </h2>
@@ -249,16 +239,14 @@ export default function Home() {
         <section id="how" className="lp-section lp-how" aria-labelledby="how-h">
           <div className="lp-wrap">
             <div className="lp-head" data-reveal>
-              <p className="lp-eyebrow">How it works</p>
               <h2 id="how-h" className="lp-h2">
-                From your bill to the insurer&apos;s reply, in three steps.
+                From your bill to the insurer&apos;s reply.
               </h2>
             </div>
             <ol className="lp-steps">
               {steps.map((s) => (
-                <li key={s.n} className="lp-step" data-reveal>
+                <li key={s.title} className="lp-step" data-reveal>
                   <div className="lp-step__visual">{s.visual}</div>
-                  <span className="lp-step__n">{s.n}</span>
                   <h3 className="lp-step__title">{s.title}</h3>
                   <p className="lp-step__text">{s.text}</p>
                 </li>
@@ -270,9 +258,8 @@ export default function Home() {
         <section className="lp-section lp-ai lp-dark" aria-labelledby="ai-h">
           <div className="lp-wrap lp-split">
             <div className="lp-split__copy" data-reveal>
-              <p className="lp-eyebrow lp-eyebrow--light">AI with a safety catch</p>
               <h2 id="ai-h" className="lp-h2">
-                AI does the matching. Rules decide what is sent.
+                AI matches. Rules decide what is sent.
               </h2>
               <p className="lp-lead">
                 Matching a clinic&apos;s line to an insurer&apos;s code is the slow part of every claim. {site.name}{" "}
@@ -298,7 +285,6 @@ export default function Home() {
         <section id="developers" className="lp-section lp-dev" aria-labelledby="dev-h">
           <div className="lp-wrap lp-split lp-split--code">
             <div className="lp-split__copy" data-reveal>
-              <p className="lp-eyebrow">For developers</p>
               <h2 id="dev-h" className="lp-h2">
                 One request per claim. Any insurer.
               </h2>
@@ -316,13 +302,8 @@ export default function Home() {
                 </Link>
               </div>
             </div>
-            <div className="lp-code" data-reveal>
-              <div className="lp-code__bar" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-                <em>POST /v1/claims</em>
-              </div>
+            <div className="lp-code" data-reveal data-ui>
+              <p className="lp-code__bar">Create a claim, and the reply</p>
               <pre>
                 <code>{curl}</code>
               </pre>
@@ -336,7 +317,6 @@ export default function Home() {
         <section id="try" className="lp-section lp-try lp-dark field-navy" aria-labelledby="try-h">
           <div className="lp-wrap lp-split">
             <div className="lp-split__copy" data-reveal>
-              <p className="lp-eyebrow lp-eyebrow--light">Try it here</p>
               <h2 id="try-h" className="lp-h2">
                 Send a test claim.
               </h2>
@@ -354,28 +334,32 @@ export default function Home() {
         <section className="lp-section lp-guarantees" aria-labelledby="g-h">
           <div className="lp-wrap">
             <div className="lp-head" data-reveal>
-              <p className="lp-eyebrow">Built for money that matters</p>
               <h2 id="g-h" className="lp-h2">
                 A claim is revenue. We treat it that way.
               </h2>
             </div>
-            <ul className="lp-bento">
-              {guarantees.map((g) => (
-                <li key={g.title} className={`lp-bento__tile ${g.big ? "lp-bento__tile--big" : ""}`} data-reveal>
-                  <h3>{g.title}</h3>
-                  <p>{g.text}</p>
-                </li>
-              ))}
-            </ul>
+            <div className="lp-promise">
+              <div className="lp-promise__lead" data-reveal>
+                <h3>{guarantees[0].title}</h3>
+                <p>{guarantees[0].text}</p>
+              </div>
+              <ul className="lp-promise__list">
+                {guarantees.slice(1).map((g) => (
+                  <li key={g.title} data-reveal>
+                    <h3>{g.title}</h3>
+                    <p>{g.text}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </section>
 
         <section className="lp-section lp-console" aria-labelledby="console-h">
           <div className="lp-wrap">
             <div className="lp-head" data-reveal>
-              <p className="lp-eyebrow">The console</p>
               <h2 id="console-h" className="lp-h2">
-                Your billing desk sees every claim, without the API.
+                Every claim, on one screen.
               </h2>
             </div>
             <div className="lp-shots">
@@ -416,7 +400,6 @@ export default function Home() {
         <section id="pricing" className="lp-section lp-pricing" aria-labelledby="pricing-h">
           <div className="lp-wrap">
             <div className="lp-head" data-reveal>
-              <p className="lp-eyebrow">Pricing</p>
               <h2 id="pricing-h" className="lp-h2">
                 Pay only for claims an insurer acknowledges.
               </h2>
@@ -430,7 +413,6 @@ export default function Home() {
         <section className="lp-section lp-faq" aria-labelledby="faq-h">
           <div className="lp-wrap lp-faq__grid">
             <div className="lp-head" data-reveal>
-              <p className="lp-eyebrow">Questions</p>
               <h2 id="faq-h" className="lp-h2">
                 What clinics ask first.
               </h2>
@@ -452,10 +434,9 @@ export default function Home() {
         </section>
 
         <section className="lp-cta lp-dark" aria-labelledby="cta-h">
-          <div className="lp-hero__glow lp-hero__glow--cta" aria-hidden="true" />
           <div className="lp-wrap lp-cta__inner">
             <h2 id="cta-h" className="lp-cta__title">
-              Your first claim, <span className="lp-grad">today</span>.
+              Your first claim, today.
             </h2>
             <p className="lp-lead">
               Your sandbox key is ready the moment you sign up. {TRIAL_DAYS} days and {TRIAL_LIVE_CLAIMS} live claims
