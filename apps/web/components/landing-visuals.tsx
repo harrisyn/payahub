@@ -165,3 +165,32 @@ export function ReviewVisual() {
     </div>
   );
 }
+
+const moves = [
+  { via: "Medserve", note: "Through a shared platform" },
+  { via: "Its own platform", note: "Moved this month" },
+];
+
+/** An insurer changes platform; the clinic's request does not change. */
+export function SwitchVisual() {
+  const [ref, i] = useLoop(moves.length, 2600);
+  const m = moves[i];
+  return (
+    <div ref={ref} className="viz viz--switch" aria-hidden="true" data-ui>
+      <div className="viz__card viz__card--still">
+        <span className="viz__muted">Your request</span>
+        <code className="viz__code">POST /v1/claims</code>
+        <span>Same body, same insurer id</span>
+        <span className="viz__same">Unchanged before and after</span>
+      </div>
+      <div className="viz__route">
+        <span className="viz__muted">The insurer receives it through</span>
+        <span className="viz__route-via" key={i}>
+          {m.via}
+        </span>
+        <span className="viz__map-hint">{m.note}</span>
+      </div>
+      <p className="viz__whose">Updating the route is our job, not the clinic&apos;s.</p>
+    </div>
+  );
+}

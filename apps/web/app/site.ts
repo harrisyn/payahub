@@ -8,5 +8,5 @@ export const site = {
   // Search engines stay out until launch; set NEXT_PUBLIC_SITE_INDEXABLE=1 to let them in.
   indexable: process.env.NEXT_PUBLIC_SITE_INDEXABLE === "1",
   description:
-    "Payahub is one API that sends your clinic's insurance claims to every insurer in Ghana, checks each one before it leaves, and never loses one on the way.",
+    "Payahub sends your clinic's health insurance claims to every insurer in Ghana through one API and console. Each claim is coded, checked and tracked to acknowledgement, whichever platform the insurer uses.",
 };

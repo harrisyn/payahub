@@ -431,3 +431,41 @@
 .lp-plans__volume input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 2px solid var(--indigo); cursor: grab; }
 .lp-plans__foot { display: grid; gap: 12px; justify-items: start; }
 .lp-plans__foot p { font-size: 14px; color: var(--muted); }
+
+/* the problem */
+.lp-problem-story { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(40px, 6vw, 88px); align-items: start; }
+@media (max-width: 60em) { .lp-problem-story { grid-template-columns: 1fr; } }
+.lp-prose { display: grid; gap: 18px; max-width: 62ch; font-size: 18px; line-height: 1.65; color: var(--muted); }
+.lp-prose strong { color: var(--ink); font-weight: 650; }
+.lp-dark .lp-prose { color: rgb(255 255 255 / 0.72); }
+.lp-dark .lp-prose strong { color: #fff; }
+.lp-desk { background: #fff; border-radius: var(--r); padding: clamp(20px, 3vw, 28px); }
+.lp-desk h3 { font-size: 18px; }
+.lp-desk p { margin-top: 6px; font-size: 14px; color: var(--muted); }
+.lp-desk table { margin-top: 18px; width: 100%; border-collapse: collapse; font-size: 14px; }
+.lp-desk th { text-align: left; font-weight: 600; color: var(--muted); padding: 0 8px 10px 0; }
+.lp-desk td { padding: 10px 8px 10px 0; border-top: 1px solid var(--edge); vertical-align: top; }
+.lp-desk td:first-child { font-weight: 650; color: var(--ink); }
+.lp-desk tfoot td { font-weight: 650; color: var(--ink); }
+.lp-problem-after { margin-top: clamp(56px, 8vw, 96px); }
+
+/* switch visual */
+.viz--switch { gap: 12px; }
+.viz__card--still { gap: 6px; }
+.viz__same { font-size: 13px; font-weight: 600; color: var(--mint-ink); }
+.viz__route { display: grid; gap: 4px; padding: 14px 16px; border-radius: 14px; background: var(--indigo-wash); }
+.viz__route-via { font-size: 20px; font-weight: 750; letter-spacing: -0.02em; animation: viz-in 420ms var(--ease-out); }
+.viz__whose { font-size: 14px; color: var(--muted); }
+
+/* integration guide */
+.lp-guide__verbs { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.lp-guide__verbs li { display: grid; gap: 2px; padding: 16px 18px; border-radius: 14px; background: #fff; }
+.lp-guide__verbs strong { font-size: 16px; }
+.lp-guide__verbs span { font-size: 14px; color: var(--muted); }
+.lp-guide { background: var(--mist); }
+.viz__route .viz__map-hint { color: #3B3DC4; }
+.lp-why { background: #fff; }
+.lp-why .lp-desk { background: var(--mist); }
+.lp-answer { background: var(--night-2); }
+.lp-answer .viz__whose { color: rgb(255 255 255 / 0.7); }
+.lp-answer .viz__card, .lp-answer .viz__route { color: var(--ink); }

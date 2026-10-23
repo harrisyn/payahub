@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { ClaimFlow } from "@/components/claim-flow";
 import { Pricing, Reveal, SandboxTry } from "@/components/landing";
-import { CodingVisual, DeliveryVisual, IntakeVisual, ReviewVisual } from "@/components/landing-visuals";
+import { CodingVisual, DeliveryVisual, IntakeVisual, ReviewVisual, SwitchVisual } from "@/components/landing-visuals";
 import { Logo } from "@/components/logo";
 import { plans, TRIAL_DAYS, TRIAL_LIVE_CLAIMS } from "@/lib/pricing";
 
@@ -12,11 +12,11 @@ import "./landing.css";
 import { site } from "./site";
 
 export const metadata: Metadata = {
-  title: { absolute: `${site.name}: send every insurance claim to every insurer, from one API` },
+  title: { absolute: `${site.name}: health insurance claims to every insurer in Ghana, from one API` },
   description: site.description,
   alternates: { canonical: "/" },
   openGraph: {
-    title: `${site.name}: every claim, to every insurer`,
+    title: `${site.name}: every claim, every insurer, one hub`,
     description: site.description,
     url: "/",
     type: "website",
@@ -24,6 +24,14 @@ export const metadata: Metadata = {
 };
 
 const faqs = [
+  {
+    q: "Why do clinics need a claims hub now?",
+    a: "More insurers in Ghana are moving off shared aggregators onto platforms of their own, so a clinic can end up with five to seven logins, forms and code lists. Payahub gives the clinic one interface and handles every platform behind it.",
+  },
+  {
+    q: "What if our insurer moves to a different platform?",
+    a: "Nothing changes on your side. Your claims keep the same shape and the same insurer, and we route them to the insurer's new platform.",
+  },
   {
     q: "Which insurers can we send to?",
     a: "Pick yours from one shared list. Most insurers sit behind a platform (XCeli, Medserve, SmartClaims, RX Insurance or ClaimIQ, ported from integrations already working in Ghanaian clinics); you add your account on that platform once and it covers every insurer it carries. Your console shows each one's status before you rely on it.",
@@ -49,6 +57,10 @@ const faqs = [
     a: "Yes. Onboarding asks how you bill today and recommends a route: the API for software, a spreadsheet upload, scanned forms, or a web form for a few claims a month.",
   },
   {
+    q: "We run an insurer or a claims platform. How do we connect?",
+    a: "We are publishing an open integration guide covering member checks, claim submission, lookup by the clinic's reference, outcomes and code lists. Write to us for the draft, or to have your platform connected.",
+  },
+  {
     q: "How are our insurer passwords kept?",
     a: "Each set is sealed with AES-256 before it is stored, bound to your organisation and that insurer. The console shows which fields are set, never their values.",
   },
@@ -57,6 +69,23 @@ const faqs = [
 
 
 const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: site.name,
+    url: site.url,
+    logo: `${site.url}/brand/symbol-color-1024.png`,
+    email: site.email,
+    address: { "@type": "PostalAddress", addressLocality: site.city, addressCountry: "GH" },
+    areaServed: { "@type": "Country", name: "Ghana" },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: site.name,
+    url: site.url,
+    inLanguage: "en-GH",
+  },
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -148,6 +177,7 @@ export default function Home() {
             <Logo tone="reversed" className="lp-nav__logo" />
           </Link>
           <nav aria-label="Main" className="lp-nav__links">
+            <a href="#why">Why Payahub</a>
             <a href="#how">How it works</a>
             <a href="#developers">Developers</a>
             <a href="#pricing">Pricing</a>
@@ -171,7 +201,7 @@ export default function Home() {
               Every claim, every insurer, one hub.
             </h1>
             <p className="lp-hero__lead">
-              {site.name} sends your clinic&apos;s insurance claims to every insurer you work with in Ghana. It codes
+              {site.name} sends your clinic&apos;s health insurance claims to every insurer you work with in Ghana. It codes
               each line, checks it before it leaves and tracks it to acknowledgement. No portal logins, no claim lost.
             </p>
             <div className="lp-hero__actions">
@@ -204,6 +234,66 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="why" className="lp-section lp-why" aria-labelledby="why-h">
+          <div className="lp-wrap lp-problem-story">
+            <div data-reveal>
+              <h2 id="why-h" className="lp-h2">
+                Every insurer now wants its own platform.
+              </h2>
+              <div className="lp-prose lp-lead">
+                <p>
+                  For years, a few aggregators carried most of Ghana&apos;s private insurers. A clinic learned one
+                  system and reached many payers through it.
+                </p>
+                <p>
+                  That is changing. Insurers want control of their own pricing, billing and turnaround, and modern
+                  tools, AI included, have made the submission logic that once took years to build something an
+                  insurer can now build itself. Platforms such as SmartClaims and ClaimIQ show the direction, and
+                  more are coming.
+                </p>
+                <p>
+                  Insurers clear claims faster on their own platforms. <strong>The cost lands on the clinic.</strong>{" "}
+                  The billing desk that sees the patient now keeps a login, a form, a code list and a set of rules for
+                  every payer, and re-keys the same visit into each one.
+                </p>
+              </div>
+            </div>
+            <figure className="lp-desk" data-reveal>
+              <h3>One clinic&apos;s claims, on an ordinary day</h3>
+              <p>Each payer route brings its own login, codes and rules.</p>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Route</th>
+                    <th scope="col">What the desk keeps for it</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platforms.map((p) => (
+                    <tr key={p}>
+                      <td>{p}</td>
+                      <td>Its own login, form and code list</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td>An insurer&apos;s own system</td>
+                    <td>Another login, another set of rules</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>With {site.name}</td>
+                    <td>One request, one code list</td>
+                  </tr>
+                </tfoot>
+              </table>
+              <figcaption className="sr-only">
+                A clinic working with five to seven payers keeps a separate login, form and code list for each.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
         <section className="lp-section lp-problem" aria-labelledby="problem-h">
           <div className="lp-wrap">
             <div className="lp-head" data-reveal>
@@ -232,6 +322,30 @@ export default function Home() {
                   <li>Every claim tracked to the insurer&apos;s acknowledgement</li>
                 </ul>
               </article>
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-section lp-answer lp-dark" aria-labelledby="answer-h">
+          <div className="lp-wrap lp-split">
+            <div className="lp-split__copy" data-reveal>
+              <h2 id="answer-h" className="lp-h2">
+                An insurer moves. You change nothing.
+              </h2>
+              <div className="lp-prose lp-lead">
+                <p>
+                  We saw this first-hand running claims at one of Ghana&apos;s main private hospitals. So we built the
+                  layer we wanted then: one simple, smart interface for the clinic, and every platform behind it.
+                </p>
+                <p>
+                  Your software, or your billing staff in the console, send each claim once. {site.name} translates it
+                  for whichever platform the insurer uses. When a new platform appears we add it, and when an insurer
+                  switches platforms, re-routing its claims is our work, not a change request to your team.
+                </p>
+              </div>
+            </div>
+            <div className="lp-split__visual" data-reveal>
+              <SwitchVisual />
             </div>
           </div>
         </section>
@@ -311,6 +425,54 @@ export default function Home() {
                 <code>{reply}</code>
               </pre>
             </div>
+          </div>
+        </section>
+
+        <section id="platforms" className="lp-section lp-guide" aria-labelledby="guide-h">
+          <div className="lp-wrap lp-split">
+            <div className="lp-split__copy" data-reveal>
+              <h2 id="guide-h" className="lp-h2">
+                Run a claims platform? Connect once.
+              </h2>
+              <div className="lp-prose lp-lead">
+                <p>
+                  We are writing an open integration guide for insurers and platform builders: the few interfaces a
+                  platform exposes so that every clinic on {site.name} can verify members and submit claims to it,
+                  with no new work at the clinic.
+                </p>
+                <p>
+                  We want it to become the common reference for anyone building in Ghana&apos;s claims market. The
+                  guide is in draft; write to us to review it early or to have your platform connected.
+                </p>
+              </div>
+              <div className="lp-dev__links">
+                <a href={`mailto:${site.email}?subject=Integration%20guide`} className="lp-btn lp-btn--dark">
+                  Ask for the draft guide
+                </a>
+              </div>
+            </div>
+            <ul className="lp-guide__verbs" data-reveal aria-label="What the integration guide covers">
+              <li>
+                <strong>Check a member</strong>
+                <span>Is this member covered today, and on which plan?</span>
+              </li>
+              <li>
+                <strong>Submit a claim</strong>
+                <span>Whole, or line by line, with diagnoses and the clinic&apos;s own reference.</span>
+              </li>
+              <li>
+                <strong>Find a claim by our reference</strong>
+                <span>So a retry after a timeout never makes a second claim.</span>
+              </li>
+              <li>
+                <strong>Report the outcome</strong>
+                <span>Acknowledged, queried or rejected, with the reason.</span>
+              </li>
+              <li>
+                <strong>Publish your code list</strong>
+                <span>Services and medicines, so clinics&apos; items map to yours automatically.</span>
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -470,6 +632,7 @@ export default function Home() {
           <nav aria-label="Developers" className="lp-footer__col">
             <h2>Developers</h2>
             <Link href="/docs">API reference</Link>
+            <a href="#platforms">For insurers and platforms</a>
             <a href="#try">Sandbox</a>
           </nav>
           <div className="lp-footer__col">
