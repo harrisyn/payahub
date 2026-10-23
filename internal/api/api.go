@@ -44,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	s.catalogRoutes(mux)
 	s.consoleRoutes(mux)
 	s.operatorRoutes(mux)
+	s.leadRoutes(mux)
 	s.priceRoutes(mux)
 	s.walletRoutes(mux)
 	s.aiRoutes(mux)

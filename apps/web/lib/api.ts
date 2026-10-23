@@ -10,7 +10,10 @@ export const SESSION_COOKIE = "payahub_session";
 export type ApiError = { code: string; message: string; details?: Record<string, string> | unknown };
 export type ApiResult<T> = { ok: true; status: number; data: T } | { ok: false; status: number; error: ApiError };
 
-export async function api<T>(path: string, init: { method?: string; body?: unknown; token?: string | null } = {}): Promise<ApiResult<T>> {
+export async function api<T>(
+  path: string,
+  init: { method?: string; body?: unknown; token?: string | null; headers?: Record<string, string> } = {},
+): Promise<ApiResult<T>> {
   const token = init.token === undefined ? (await cookies()).get(SESSION_COOKIE)?.value : init.token;
   let res: Response;
   try {
@@ -19,6 +22,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       cache: "no-store",

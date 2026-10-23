@@ -1089,6 +1089,84 @@ paths:
                         detail: { type: object }
                         changed_by: { type: string }
                         changed_at: { type: string, format: date-time }
+  /v1/leads:
+    post:
+      security: []
+      summary: Send an enquiry from the public site
+      description: |
+        `contact` asks to be called (name, email, phone). `platform` is an insurer or claims platform
+        that is not listed (organization, email, phone). `payer` asks us to add a payer (payer_name,
+        email, phone; monthly_claims and payer_contact help us prioritise). `specs` asks for the
+        interface (email; phone optional). Honours `Idempotency-Key`: a repeat returns the first lead with 200.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, email]
+              properties:
+                kind: { type: string, enum: [contact, platform, payer, specs] }
+                name: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string, description: "7 to 15 digits; spaces, dashes and a leading + are allowed" }
+                organization: { type: string }
+                payer_name: { type: string }
+                monthly_claims: { type: integer, minimum: 0, description: Claims a month the clinic sends this payer }
+                payer_contact: { type: string, description: Who to talk to at the payer }
+                message: { type: string }
+      responses:
+        "201":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  kind: { type: string }
+                  created_at: { type: string, format: date-time }
+        "200": { description: A replay of an earlier request with the same Idempotency-Key }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/openapi.yaml:
+    get:
+      security: []
+      summary: This specification, for anyone building against Payahub
+      responses:
+        "200": { description: OpenAPI 3.1 YAML, content: { application/yaml: {} } }
+  /v1/operator/leads:
+    get:
+      security: [{ session: [] }]
+      summary: Enquiries from the public site, newest first (operators only)
+      parameters:
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [contact, platform, payer, specs] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        kind: { type: string }
+                        name: { type: string }
+                        email: { type: string }
+                        phone: { type: string }
+                        organization: { type: string }
+                        payer_name: { type: string }
+                        monthly_claims: { type: [integer, "null"] }
+                        payer_contact: { type: string }
+                        message: { type: string }
+                        created_at: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     apiKey: { type: http, scheme: bearer, description: "sk_sandbox_… or sk_live_…" }

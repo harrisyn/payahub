@@ -79,6 +79,15 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Idempotency-Key on every write; audit trail
 - [x] Landing page, sign-up, trial, onboarding console, API docs
 - [x] Brand: Ananse exchange logo and palette (PR #3)
+- [x] Standard form kit (`@/components/ui`, Mantine 9): searchable selects, remote type-ahead through
+      `/lookup/[kind]`, prepend/append inputs, money in minor units, rich text, tags, dates; shown at `/ui`
+- [ ] Move every existing console form onto the kit (native selects and inputs today)
+- [x] Landing page redesign: animated claims-flow hero, how-it-works visuals, live sandbox, share image,
+      `NEXT_PUBLIC_SITE_INDEXABLE` switch for launch
+- [x] Landing page taste pass, problem story, platform layer and integration-guide sections, SEO structured data
+- [x] Lead capture on the landing page (contact me, platform not listed, do you have this payer, interface specs):
+  `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
+- [ ] Notify operators of a new enquiry by email once outbound email is set up
 - [ ] Team members and roles
 - [ ] Webhooks to the clinic's system on every state change
 - [x] Wallets: double-entry ledger; organisation and platform wallets; per-claim charges on acknowledgement and
