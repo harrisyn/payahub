@@ -79,6 +79,10 @@ each with contract tests against a recorded copy of the platform's API.
 - [ ] Move every existing console form onto the kit (native selects and inputs today)
 - [x] Landing page redesign: animated claims-flow hero, how-it-works visuals, live sandbox, share image,
       `NEXT_PUBLIC_SITE_INDEXABLE` switch for launch
+- [x] Landing page taste pass, problem story, platform layer and integration-guide sections, SEO structured data
+- [x] Lead capture on the landing page (contact me, platform not listed, do you have this payer, interface specs):
+  `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
+- [ ] Notify operators of a new enquiry by email once outbound email is set up
 - [ ] Team members and roles
 - [ ] Webhooks to the clinic's system on every state change
 - [ ] Billing and usage (Paystack)

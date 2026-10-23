@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ClaimFlow } from "@/components/claim-flow";
 import { Pricing, Reveal, SandboxTry } from "@/components/landing";
 import { CodingVisual, DeliveryVisual, IntakeVisual, ReviewVisual, SwitchVisual } from "@/components/landing-visuals";
+import { LeadForm } from "@/components/lead-form";
 import { Logo } from "@/components/logo";
 import { plans, TRIAL_DAYS, TRIAL_LIVE_CLAIMS } from "@/lib/pricing";
 
@@ -446,8 +447,11 @@ export default function Home() {
                 </p>
               </div>
               <div className="lp-dev__links">
-                <a href={`mailto:${site.email}?subject=Integration%20guide`} className="lp-btn lp-btn--dark">
-                  Ask for the draft guide
+                <a href="#contact-platform" className="lp-btn lp-btn--dark">
+                  Connect your platform
+                </a>
+                <a href="#contact-specs" className="lp-link">
+                  Get the interface
                 </a>
               </div>
             </div>
@@ -572,6 +576,29 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="contact" className="lp-section lp-contact" aria-labelledby="contact-h">
+          <div className="lp-wrap lp-split lp-split--form">
+            <div className="lp-split__copy" data-reveal>
+              <h2 id="contact-h" className="lp-h2">
+                Tell us what you need.
+              </h2>
+              <div className="lp-prose lp-lead">
+                <p>
+                  A clinic ready to stop re-keying claims, an insurer or platform we have not connected yet, a payer
+                  you want us to reach, or a developer who wants the interface: pick one and we will take it from
+                  there.
+                </p>
+                <p>
+                  Prefer email? Write to <a href={`mailto:${site.email}`}>{site.email}</a>.
+                </p>
+              </div>
+            </div>
+            <div data-reveal>
+              <LeadForm />
+            </div>
+          </div>
+        </section>
+
         <section className="lp-section lp-faq" aria-labelledby="faq-h">
           <div className="lp-wrap lp-faq__grid">
             <div className="lp-head" data-reveal>
@@ -633,10 +660,12 @@ export default function Home() {
             <h2>Developers</h2>
             <Link href="/docs">API reference</Link>
             <a href="#platforms">For insurers and platforms</a>
+            <a href="#contact-specs">Interface specs</a>
             <a href="#try">Sandbox</a>
           </nav>
           <div className="lp-footer__col">
             <h2>Contact</h2>
+            <a href="#contact">Talk to us</a>
             <a href={`mailto:${site.email}`}>{site.email}</a>
             <span>{site.city}, Ghana</span>
           </div>
