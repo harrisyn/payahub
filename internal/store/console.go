@@ -237,9 +237,23 @@ func (s *Store) SaveProfile(ctx context.Context, orgID string, p onboarding.Prof
 	return err
 }
 
-func (s *Store) SetPlan(ctx context.Context, orgID string, plan onboarding.Plan) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE organizations SET plan = $2 WHERE id = $1`, orgID, plan)
-	return err
+// SetPlan changes the plan and, for a plan with a monthly fee, charges this
+// month's fee (less any fee already charged this month) in the same
+// transaction. It returns what was charged.
+func (s *Store) SetPlan(ctx context.Context, orgID string, plan onboarding.Plan) (int64, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE organizations SET plan = $2 WHERE id = $1`, orgID, plan); err != nil {
+		return 0, err
+	}
+	charged, err := ChargeMonthlyFee(ctx, tx, orgID, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	return charged, tx.Commit(ctx)
 }
 
 // Usage counts claims this calendar month (UTC). Billable means the payer
@@ -521,26 +535,6 @@ func (s *Store) ListClaims(ctx context.Context, orgID, env, state string, before
 		return c, r.Scan(&c.ID, &c.Environment, &c.PayerID, &c.State, &c.PayerClaimNumber, &c.MemberNumber,
 			&c.Currency, &c.Total, &c.CreatedAt, &c.UpdatedAt)
 	})
-}
-
-// TrialAllowsLive reports whether an organisation may send one more live
-// claim: any paid plan may; a trial may until it ends or hits its cap.
-func TrialAllowsLive(ctx context.Context, q Querier, orgID string) (bool, error) {
-	var plan string
-	var ends *time.Time
-	var sent int
-	err := q.QueryRow(ctx, `
-		SELECT o.plan, o.trial_ends_at,
-		       (SELECT count(*) FROM claims c WHERE c.organization_id = o.id AND c.environment = 'live'
-		        AND c.state NOT IN ('draft', 'mapped', 'validated', 'needs_review', 'ready'))
-		FROM organizations o WHERE o.id = $1`, orgID).Scan(&plan, &ends, &sent)
-	if err != nil {
-		return false, err
-	}
-	if plan != string(onboarding.PlanTrial) {
-		return true, nil
-	}
-	return ends != nil && time.Now().Before(*ends) && sent < onboarding.TrialLiveClaims, nil
 }
 
 // HasAcknowledgedClaim reports whether any claim of the organisation in env

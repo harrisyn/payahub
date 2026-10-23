@@ -279,6 +279,11 @@ func SaveClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim, from claim.State,
 	if err != nil {
 		return err
 	}
+	if c.Environment == "live" && c.State.Billable() && !from.Billable() {
+		if err := chargeClaim(ctx, tx, c); err != nil {
+			return err
+		}
+	}
 	return addEvent(ctx, tx, c.ID, kind, from, c.State, detail)
 }
 

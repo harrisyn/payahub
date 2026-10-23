@@ -19,6 +19,7 @@ import (
 	"github.com/harrisyn/payahub/internal/claim"
 	_ "github.com/harrisyn/payahub/internal/connector/all"
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
+	"github.com/harrisyn/payahub/internal/payment"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
@@ -70,6 +71,7 @@ func setup(t testing.TB) env {
 		if setupErr = rc.Start(ctx); setupErr != nil {
 			return
 		}
+		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
 		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler())
 	})
 	if setupErr != nil {

@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	s.consoleRoutes(mux)
 	s.operatorRoutes(mux)
 	s.priceRoutes(mux)
+	s.walletRoutes(mux)
 	return mux
 }
 
@@ -244,6 +245,9 @@ func (s *Server) submitClaim(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, queue.ErrTrialLimit):
 		writeError(w, http.StatusPaymentRequired, "trial_limit",
 			"Your trial has no live claims left. Choose a plan to keep sending live claims.", nil)
+	case errors.Is(err, queue.ErrWalletEmpty):
+		writeError(w, http.StatusPaymentRequired, "wallet_empty",
+			"Your wallet does not cover another live claim. Add funds to keep sending live claims.", nil)
 	case errors.Is(err, queue.ErrNotSubmittable):
 		writeError(w, http.StatusUnprocessableEntity, "not_submittable",
 			"The claim did not pass validation; it is now "+string(c.State)+".", v.Issues)

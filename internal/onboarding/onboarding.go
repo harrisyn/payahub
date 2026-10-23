@@ -127,3 +127,25 @@ const (
 var Choosable = []Plan{PlanFlat, PlanFlatVolume, PlanVolume, PlanEnterprise}
 
 func TrialEnds(from time.Time) time.Time { return from.AddDate(0, 0, TrialDays) }
+
+// BillingCurrency is the currency plans are priced and wallets charged in.
+const BillingCurrency = "GHS"
+
+// Price is what a plan charges, in minor units of BillingCurrency. The web
+// app shows the same figures (apps/web/lib/pricing.ts); a test keeps them equal.
+type Price struct {
+	MonthlyFee int64 `json:"monthly_fee"`
+	PerClaim   int64 `json:"per_claim"` // for each claim a payer acknowledges
+	Included   int   `json:"included"`  // acknowledged claims the fee covers (fair use on flat)
+}
+
+// Prices covers the plans charged from the wallet. Trial is free, and
+// enterprise is invoiced offline, so neither is charged.
+var Prices = map[Plan]Price{
+	PlanFlat:       {MonthlyFee: 180000, Included: 1500},
+	PlanFlatVolume: {MonthlyFee: 60000, PerClaim: 100},
+	PlanVolume:     {PerClaim: 200},
+}
+
+// WalletFunded reports whether the plan is paid from the organisation's wallet.
+func (p Plan) WalletFunded() bool { _, ok := Prices[p]; return ok }

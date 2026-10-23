@@ -160,6 +160,9 @@ func (s *Server) checkImported(r *http.Request, ic *importedClaim, fileSHA []byt
 		case errors.Is(err, queue.ErrTrialLimit):
 			ic.Issues = append(ic.Issues, engine.Issue{Code: "trial_limit", Severity: engine.SeverityWarning,
 				Message: "Not sent: the trial has no live claims left."})
+		case errors.Is(err, queue.ErrWalletEmpty):
+			ic.Issues = append(ic.Issues, engine.Issue{Code: "wallet_empty", Severity: engine.SeverityWarning,
+				Message: "Not sent: your wallet does not cover another live claim."})
 		case errors.Is(err, queue.ErrNotSubmittable):
 			ic.Issues = qv.Issues
 		case err != nil:
