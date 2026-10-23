@@ -517,3 +517,5 @@ object.app-read__view { height: min(78vh, 900px); }
   .app-read__opts, .app-read__item { grid-column: 1 / -1; }
   .app-read__opts { padding-top: 0; grid-auto-flow: column; justify-content: start; gap: 16px; }
 }
+/* A select in a table cell shrinks with the cell instead of running off the card. */
+.app-table td select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
