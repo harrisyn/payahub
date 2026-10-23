@@ -1,14 +1,20 @@
 package assist
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/harrisyn/payahub/internal/ai"
+	"github.com/harrisyn/payahub/internal/deid"
 )
 
 // fake answers with fn's JSON and remembers what it was asked.
@@ -19,6 +25,15 @@ type fake struct {
 }
 
 func (f *fake) Complete(_ context.Context, r ai.Request) (ai.Response, error) {
+	for _, p := range r.Parts {
+		m := p.Data
+		if m == nil {
+			m = []byte(p.Text)
+		}
+		if !r.Cleared.Covers(m) {
+			return ai.Response{}, ai.ErrNotDeidentified
+		}
+	}
 	f.mu.Lock()
 	f.reqs = append(f.reqs, r)
 	f.mu.Unlock()
@@ -80,9 +95,8 @@ func v(value string, conf float64) map[string]any {
 func TestReadClaimFormChecksEveryValue(t *testing.T) {
 	f := &fake{fn: func(r ai.Request) any {
 		return map[string]any{
-			"payer_name": v("GLICO", 0.95), "member_number": v("GL-123456", 0.97), "policy_number": v("", 0),
-			"first_name": v("Ama", 0.99), "last_name": v("Mensah", 0.99), "birth_date": v("1990-02-30", 0.9),
-			"gender": v("Female", 0.95), "provider_name": v("Ridge Clinic", 0.98), "encounter_date": v("2026-10-03", 0.96),
+			"payer_name": v("GLICO", 0.95),
+			"gender":     v("Female", 0.95), "provider_name": v("Ridge Clinic", 0.98), "encounter_date": v("2026-10-03", 0.96),
 			"discharge_date": v("", 0), "authorization_code": v("", 0),
 			"diagnoses": []any{
 				map[string]any{"text": v("Malaria", 0.95), "icd10": v("B54", 0.94), "primary": true},
@@ -94,7 +108,7 @@ func TestReadClaimFormChecksEveryValue(t *testing.T) {
 			},
 		}
 	}}
-	x, run, err := ReadClaimForm(context.Background(), f, Document{Name: "form.pdf", MediaType: "application/pdf", Data: []byte("%PDF-1.7")}, 0.9)
+	x, run, err := ReadClaimForm(context.Background(), f, formOCR{}, Document{Name: "form.png", MediaType: "image/png", Data: blank(400, 120)}, 0.9)
 	if err != nil || run.Err != nil {
 		t.Fatal(err, run.Err)
 	}
@@ -102,7 +116,7 @@ func TestReadClaimFormChecksEveryValue(t *testing.T) {
 	if c.PayerID == "" || x.PayerName != "GLICO" {
 		t.Errorf("payer: %q from %q", c.PayerID, x.PayerName)
 	}
-	if c.Member.BirthDate != nil || x.Fields["member.birth_date"].Read != "1990-02-30" || !x.Fields["member.birth_date"].NeedsReview {
+	if c.Member.BirthDate != nil || x.Fields["member.birth_date"].Read != "30/02/1990" || !x.Fields["member.birth_date"].NeedsReview {
 		t.Errorf("an impossible date was kept: %v %+v", c.Member.BirthDate, x.Fields["member.birth_date"])
 	}
 	if c.Member.Gender != "female" || c.Encounter.StartDate.Format("2006-01-02") != "2026-10-03" {
@@ -123,19 +137,73 @@ func TestReadClaimFormChecksEveryValue(t *testing.T) {
 	if c.Lines[1].Quantity != 1 || c.Lines[1].UnitPrice != 0 || !x.Fields["lines.1.unit_price"].NeedsReview {
 		t.Errorf("bad quantity or price kept: %+v %+v", c.Lines[1], x.Fields["lines.1.unit_price"])
 	}
-	if x.Fields["lines.0.unit_price"].NeedsReview != true || x.Fields["member.member_number"].NeedsReview {
+	if x.Fields["lines.0.unit_price"].NeedsReview != true || x.Fields["provider.name"].NeedsReview {
 		t.Error("the threshold was not applied per field")
+	}
+	// The identity came from this machine's reading, for a person to check.
+	if c.Member.FirstName != "Ama" || c.Member.LastName != "Mensah" || c.Member.MemberNumber != "GL-123456" || !x.Fields["member.last_name"].NeedsReview {
+		t.Errorf("identity: %+v %+v", c.Member, x.Fields["member.last_name"])
+	}
+	if x.Privacy.Method != "image" || x.Privacy.Removed["region"] == 0 || run.Privacy.Method == "" {
+		t.Errorf("privacy: %+v %+v", x.Privacy, run.Privacy)
 	}
 	if x.Review == 0 || x.Evidence.PromptVersion != ReadPrompt || x.Evidence.Origin != "ai_extracted" {
 		t.Errorf("summary: %+v", x)
 	}
-	if f.reqs[0].Parts[0].MediaType != "application/pdf" {
-		t.Error("the document was not sent")
+	// The model got a page with the name blacked out, not the file.
+	sent := f.reqs[0].Parts[0]
+	if sent.MediaType != "image/png" || bytes.Equal(sent.Data, blank(400, 120)) {
+		t.Fatal("the page was not redacted")
+	}
+	img, _ := png.Decode(bytes.NewReader(sent.Data))
+	if r, g, b, _ := img.At(150, 15).RGBA(); r|g|b != 0 {
+		t.Error("the name is not blacked out")
+	}
+	if r, _, _, _ := img.At(150, 100).RGBA(); r == 0 {
+		t.Error("the bill was blacked out")
 	}
 }
 
+// formOCR reads a small form: the name, NHIS number and birth date on their
+// own lines, and a bill line below.
+type formOCR struct{}
+
+func (formOCR) Words(context.Context, image.Image) ([]deid.Word, error) {
+	w := func(text string, x, y, line int) deid.Word {
+		return deid.Word{Text: text, Box: image.Rect(x, y, x+len(text)*8, y+14), Line: fmt.Sprint(line)}
+	}
+	return []deid.Word{
+		w("Name:", 10, 10, 1), w("Ama", 100, 10, 1), w("Mensah", 140, 10, 1), w("Sex:", 300, 10, 1), w("F", 340, 10, 1),
+		w("NHIS", 10, 40, 2), w("No:", 50, 40, 2), w("GL-123456", 100, 40, 2),
+		w("DOB:", 10, 70, 3), w("30/02/1990", 100, 70, 3),
+		w("Paracetamol", 10, 100, 4), w("1,250.50", 200, 100, 4),
+	}, nil
+}
+
+func blank(w, h int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(img, img.Bounds(), image.White, image.Point{}, draw.Src)
+	var b bytes.Buffer
+	_ = png.Encode(&b, img)
+	return b.Bytes()
+}
+
+func TestReadClaimFormNeedsTheNameFound(t *testing.T) {
+	f := &fake{fn: func(ai.Request) any { return map[string]any{} }}
+	_, _, err := ReadClaimForm(context.Background(), f, noLabels{}, Document{MediaType: "image/png", Data: blank(50, 50)}, 0.9)
+	if !errors.Is(err, deid.ErrNameNotFound) || len(f.reqs) != 0 {
+		t.Fatalf("a form with no name label was sent: %v", err)
+	}
+}
+
+type noLabels struct{}
+
+func (noLabels) Words(context.Context, image.Image) ([]deid.Word, error) {
+	return []deid.Word{{Text: "Kwame", Box: image.Rect(1, 1, 30, 10), Line: "1"}}, nil
+}
+
 func TestReadClaimFormRefusesOtherFiles(t *testing.T) {
-	if _, _, err := ReadClaimForm(context.Background(), &fake{}, Document{MediaType: "text/html"}, 0.9); err == nil {
+	if _, _, err := ReadClaimForm(context.Background(), &fake{}, formOCR{}, Document{MediaType: "text/html"}, 0.9); err == nil {
 		t.Fatal("read an HTML file")
 	}
 }

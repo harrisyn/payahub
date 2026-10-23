@@ -2,7 +2,11 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"image"
+	"image/draw"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -10,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/harrisyn/payahub/internal/deid"
 )
 
 func readField(v string, c float64) map[string]any {
@@ -32,11 +38,12 @@ func modelStub(t *testing.T, down *atomic.Bool) *httptest.Server {
 				map[string]any{"code": "PCM", "item_id": "MED-0001", "confidence": 0.96, "reason": "paracetamol 500 mg tablet"},
 				map[string]any{"code": "BOGUS", "item_id": "MED-4040", "confidence": 0.99, "reason": "invented"},
 			}}
-		case bytes.Contains(body, []byte("application/pdf")):
+		case bytes.Contains(body, []byte("data:image/png;base64,")):
+			if bytes.Contains(body, []byte("Kofi")) || bytes.Contains(body, []byte("M-1001")) {
+				t.Errorf("the patient's identity reached the model")
+			}
 			answer = map[string]any{
-				"payer_name": readField("Sandbox Mutual", 0.97), "member_number": readField("M-1001", 0.98),
-				"policy_number": readField("", 0), "first_name": readField("Kofi", 0.99), "last_name": readField("Boateng", 0.99),
-				"birth_date": readField("1985-06-14", 0.93), "gender": readField("male", 0.97), "provider_name": readField("Ridge Clinic", 0.99),
+				"payer_name": readField("Sandbox Mutual", 0.97), "gender": readField("male", 0.97), "provider_name": readField("Ridge Clinic", 0.99),
 				"encounter_date": readField("2026-10-03", 0.95), "discharge_date": readField("", 0), "authorization_code": readField("", 0),
 				"diagnoses": []any{map[string]any{"text": readField("Malaria", 0.96), "icd10": readField("B54", 0.95), "primary": true}},
 				"lines": []any{map[string]any{"description": readField("Consultation, general practitioner", 0.95),
@@ -79,14 +86,14 @@ func TestModelsMatchItemsAndReadForms(t *testing.T) {
 	e := setup(t)
 	clearAIProviders(t)
 	op := operatorSession(t, e)
-	pdf := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n")
+	pdf := formPNG()
 
 	// Before any model is set up: word matching, and forms are not read.
 	_, out := e.do(t, "POST", "/v1/items/suggest", map[string]any{"items": []any{map[string]any{"code": "PCM", "name": "PCM 500 tabs"}}})
 	if out["method"] != "words" {
 		t.Fatalf("no model, yet method %v", out["method"])
 	}
-	if s, out := upload(t, e, "form.pdf", "application/pdf", pdf); s != 409 || out["error"].(map[string]any)["code"] != "no_model" {
+	if s, out := upload(t, e, "form.png", "image/png", pdf); s != 409 || out["error"].(map[string]any)["code"] != "no_model" {
 		t.Fatalf("read a form with no model: %d %v", s, out)
 	}
 
@@ -121,13 +128,16 @@ func TestModelsMatchItemsAndReadForms(t *testing.T) {
 	}
 
 	// A form becomes a proposed claim, which then saves like any other.
-	s, x := upload(t, e, "form.pdf", "application/pdf", pdf)
+	s, x := upload(t, e, "form.png", "image/png", pdf)
 	if s != 200 {
 		t.Fatalf("extract: %d %v", s, x)
 	}
 	c := x["claim"].(map[string]any)
-	if c["payer_id"] == "" || c["member"].(map[string]any)["member_number"] != "M-1001" {
+	if m := c["member"].(map[string]any); c["payer_id"] == "" || m["member_number"] != "M-1001" || m["last_name"] != "Boateng" {
 		t.Fatalf("claim: %v", c)
+	}
+	if p := x["privacy"].(map[string]any); p["method"] != "image" {
+		t.Fatalf("privacy: %v", p)
 	}
 	if f := x["fields"].(map[string]any)["lines.0.unit_price"].(map[string]any); f["needs_review"] != true {
 		t.Errorf("a price read at 0.8 was not marked for review: %v", f)
@@ -145,7 +155,7 @@ func TestModelsMatchItemsAndReadForms(t *testing.T) {
 	if out["method"] != "words" || !strings.Contains(out["note"].(string), "could not answer") {
 		t.Fatalf("fallback: %v", out)
 	}
-	if s, _ := upload(t, e, "form.pdf", "application/pdf", pdf); s != 502 {
+	if s, _ := upload(t, e, "form.png", "image/png", pdf); s != 502 {
 		t.Fatalf("a failed read: %d", s)
 	}
 
@@ -161,4 +171,24 @@ func TestModelsMatchItemsAndReadForms(t *testing.T) {
 	if s, _ := e.do(t, "GET", "/v1/operator/ai-usage", nil); s != 403 && s != 401 {
 		t.Fatalf("a customer read model usage: %d", s)
 	}
+}
+
+// formOCR stands in for Tesseract: every page has the patient's name and
+// member number beside their labels.
+type formOCR struct{}
+
+func (formOCR) Words(context.Context, image.Image) ([]deid.Word, error) {
+	w := func(text string, x, y int, line string) deid.Word {
+		return deid.Word{Text: text, Box: image.Rect(x, y, x+len(text)*6, y+10), Line: line}
+	}
+	return []deid.Word{w("Name:", 2, 2, "1"), w("Kofi", 40, 2, "1"), w("Boateng", 70, 2, "1"),
+		w("Member", 2, 20, "2"), w("No:", 45, 20, "2"), w("M-1001", 70, 20, "2")}, nil
+}
+
+func formPNG() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 200, 60))
+	draw.Draw(img, img.Bounds(), image.White, image.Point{}, draw.Src)
+	var b bytes.Buffer
+	_ = png.Encode(&b, img)
+	return b.Bytes()
 }

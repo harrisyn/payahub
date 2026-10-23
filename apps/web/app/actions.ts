@@ -664,7 +664,7 @@ export async function readClaimForm(_: ReadState, form: FormData): Promise<ReadS
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a PDF or a photo of the claim form." };
   if (file.size > 10 << 20) return { error: "The file is over 10 MB. Scan it at a lower resolution." };
   if (!formTypes.includes(file.type)) return { error: "Use a PDF, or a JPEG, PNG or WebP photo." };
-  const res = await api<Extraction>("/v1/claims/extract", {
+  const res = await api<Extraction>("/v1/claims/extract?include=redacted_pages", {
     method: "POST",
     file: { data: await file.arrayBuffer(), type: file.type },
   });

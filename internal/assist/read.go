@@ -11,13 +11,16 @@ import (
 	"github.com/harrisyn/payahub/internal/ai"
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
+	"github.com/harrisyn/payahub/internal/deid"
 	"github.com/harrisyn/payahub/internal/icd10"
 )
 
 // ReadPrompt is the version of the claim-form instructions.
-const ReadPrompt = "read-claim-form-v1"
+const ReadPrompt = "read-claim-form-v2"
 
 const readSystem = `You read one health insurance claim form, invoice or bill from a clinic in Ghana and copy what it says into fields.
+
+Black boxes cover the patient's name, member and card numbers, date of birth, phone and address. They were removed on purpose before you were shown the document; do not guess what is under them, and do not copy any name you see.
 
 Copy, do not infer. Each field has a value, a confidence and a quote:
 - value: what the document says, normalised as each field describes. Leave it empty when the document does not say it or you cannot read it.
@@ -34,11 +37,6 @@ func field() map[string]any {
 
 var readSchema = object(map[string]any{
 	"payer_name":         field(),
-	"member_number":      field(),
-	"policy_number":      field(),
-	"first_name":         field(),
-	"last_name":          field(),
-	"birth_date":         field(),
 	"gender":             field(),
 	"provider_name":      field(),
 	"encounter_date":     field(),
@@ -81,6 +79,10 @@ type Extraction struct {
 	PayerName string           `json:"payer_name,omitempty"`
 	Review    int              `json:"review"` // how many fields need a person
 	Evidence  claim.Evidence   `json:"evidence"`
+	// Privacy says what was blacked out before the model saw the document,
+	// and Pages are the blacked-out pages it saw (PNG).
+	Privacy deid.Report `json:"privacy"`
+	Pages   [][]byte    `json:"-"`
 }
 
 // Document is a file to read.
@@ -95,29 +97,37 @@ const MaxDocument = 10 << 20
 
 var mediaTypes = map[string]bool{"application/pdf": true, "image/png": true, "image/jpeg": true, "image/webp": true}
 
-// ReadClaimForm reads a claim form into a proposed claim. Each value is
-// checked: dates and amounts must parse, ICD-10 codes must be in the list,
-// the payer must be in the catalogue, and a line's standard item comes from
-// the catalogue's own matching, never from the model.
-func ReadClaimForm(ctx context.Context, c Completer, doc Document, threshold float64) (Extraction, Run, error) {
+// ReadClaimForm reads a claim form into a proposed claim. The patient's
+// identity is blacked out on this server first (ocr reads the words), so
+// the model sees none of it; the name, numbers and birth date are read
+// locally from the blacked-out places instead, for a person to check. Each
+// value is checked: dates and amounts must parse, ICD-10 codes must be in
+// the list, the payer must be in the catalogue, and a line's standard item
+// comes from the catalogue's own matching, never from the model.
+func ReadClaimForm(ctx context.Context, c Completer, ocr deid.OCR, doc Document, threshold float64) (Extraction, Run, error) {
 	if !mediaTypes[doc.MediaType] {
 		return Extraction{}, Run{}, fmt.Errorf("a claim form must be a PDF, PNG, JPEG or WebP file")
+	}
+	red, err := deid.Redact(ctx, ocr, doc.Data, doc.MediaType, deid.Identity{})
+	if err != nil {
+		return Extraction{}, Run{}, err
+	}
+	ask, asked := deid.Catalogue("Read this document into the fields.")
+	parts := make([]ai.Part, 0, len(red.Pages)+1)
+	for i, pg := range red.Pages {
+		parts = append(parts, ai.Part{MediaType: "image/png", Data: pg, Name: fmt.Sprintf("page-%d.png", i+1)})
 	}
 	req := ai.Request{
 		Task:       ai.TaskDocumentIntake,
 		System:     readSystem,
-		Parts:      []ai.Part{{MediaType: doc.MediaType, Data: doc.Data, Name: doc.Name}, ai.Text("Read this document into the fields.")},
+		Parts:      append(parts, ai.Text(ask)),
 		Schema:     readSchema,
 		SchemaName: "claim_form",
 		MaxTokens:  16000,
+		Cleared:    deid.Join(red.Cleared, asked),
 	}
 	var out struct {
 		PayerName         read `json:"payer_name"`
-		MemberNumber      read `json:"member_number"`
-		PolicyNumber      read `json:"policy_number"`
-		FirstName         read `json:"first_name"`
-		LastName          read `json:"last_name"`
-		BirthDate         read `json:"birth_date"`
 		Gender            read `json:"gender"`
 		ProviderName      read `json:"provider_name"`
 		EncounterDate     read `json:"encounter_date"`
@@ -166,16 +176,8 @@ func ReadClaimForm(ctx context.Context, c Completer, doc Document, threshold flo
 		x.Fields["payer_id"] = Field{Read: x.PayerName, Quote: strings.TrimSpace(out.PayerName.Quote), NeedsReview: true,
 			Note: "No single insurer of this name in the catalogue; choose it."}
 	}
-	in.Member.MemberNumber = put("member.member_number", out.MemberNumber, text(out.MemberNumber), "")
-	in.Member.PolicyNumber = put("member.policy_number", out.PolicyNumber, text(out.PolicyNumber), "")
-	in.Member.FirstName = put("member.first_name", out.FirstName, text(out.FirstName), "")
-	in.Member.LastName = put("member.last_name", out.LastName, text(out.LastName), "")
-	if d, ok := date(out.BirthDate.Value); ok {
-		put("member.birth_date", out.BirthDate, day(d), "")
-		in.Member.BirthDate = &d
-	} else {
-		put("member.birth_date", out.BirthDate, "", "Not a date.")
-	}
+	x.Privacy, x.Pages = red.Cleared.Report, red.Pages
+	identity(&x, red.Found)
 	if g := strings.ToLower(text(out.Gender)); g == "male" || g == "female" {
 		in.Member.Gender = put("member.gender", out.Gender, g, "")
 	} else {
@@ -269,6 +271,46 @@ func ReadClaimForm(ctx context.Context, c Completer, doc Document, threshold flo
 		x.Evidence.Confidence = &avg
 	}
 	return x, run, nil
+}
+
+// identity fills the patient's details from what was read on this server
+// in the blacked-out places. Printed-text reading is weaker on handwriting
+// than a model, so a person checks every one.
+func identity(x *Extraction, found map[string]string) {
+	local := func(path, v string) string {
+		if v = strings.TrimSpace(v); v == "" {
+			return ""
+		}
+		x.Fields[path] = Field{Confidence: 0.5, Quote: v, NeedsReview: true,
+			Note: "Read on Payahub's server from the part hidden from the model; check it."}
+		return v
+	}
+	m := &x.Claim.Member
+	first, last := found["first_name"], found["last_name"]
+	if first == "" && last == "" {
+		if f := strings.Fields(found["name"]); len(f) > 1 {
+			first, last = strings.Join(f[:len(f)-1], " "), f[len(f)-1]
+		} else if len(f) == 1 {
+			last = f[0]
+		}
+	}
+	m.FirstName = local("member.first_name", first)
+	m.LastName = local("member.last_name", last)
+	m.MemberNumber = local("member.member_number", found["member_number"])
+	m.PolicyNumber = local("member.policy_number", found["policy_number"])
+	if v := strings.TrimSpace(found["birth_date"]); v != "" {
+		for _, f := range []string{"02/01/2006", "2/1/2006", "02-01-2006", "02.01.2006", "2006-01-02", "2 Jan 2006", "2 January 2006"} {
+			if t, err := time.Parse(f, v); err == nil && t.Year() > 1900 && t.Before(time.Now()) {
+				d := claim.Date{Time: t}
+				local("member.birth_date", day(d))
+				m.BirthDate = &d
+				break
+			}
+		}
+		if m.BirthDate == nil {
+			x.Fields["member.birth_date"] = Field{Read: v, NeedsReview: true, Note: "Not a date; enter it."}
+		}
+	}
 }
 
 func date(s string) (claim.Date, bool) {

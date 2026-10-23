@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type AIRun struct {
 	DurationMS    int       `json:"duration_ms"`
 	OK            bool      `json:"ok"`
 	Error         string    `json:"error,omitempty"`
+	Privacy       any       `json:"privacy,omitempty"` // the de-identifier's report
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -28,12 +30,16 @@ func (s *Store) RecordAIRuns(ctx context.Context, runs []AIRun) error {
 		if r.ID == "" {
 			r.ID = NewID("air")
 		}
+		privacy, err := json.Marshal(r.Privacy)
+		if err != nil || r.Privacy == nil {
+			privacy = []byte("{}")
+		}
 		if _, err := s.Pool.Exec(ctx, `
 			INSERT INTO ai_runs (id, organization_id, task, provider, model, prompt_version, prompt_hash, input_sha256,
-				input_tokens, output_tokens, duration_ms, ok, error)
-			VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+				input_tokens, output_tokens, duration_ms, ok, error, privacy)
+			VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			r.ID, r.OrgID, r.Task, r.Provider, r.Model, r.PromptVersion, r.PromptHash, r.InputSHA256,
-			r.InputTokens, r.OutputTokens, r.DurationMS, r.OK, r.Error); err != nil {
+			r.InputTokens, r.OutputTokens, r.DurationMS, r.OK, r.Error, privacy); err != nil {
 			return err
 		}
 	}

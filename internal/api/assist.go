@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/harrisyn/payahub/internal/assist"
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
+	"github.com/harrisyn/payahub/internal/deid"
 	"github.com/harrisyn/payahub/internal/engine"
 	"github.com/harrisyn/payahub/internal/store"
 )
@@ -95,7 +97,7 @@ func (s *Server) recordRuns(ctx context.Context, orgID string, runs []assist.Run
 		rec = append(rec, store.AIRun{OrgID: orgID, Task: r.Task, Provider: r.Provider, Model: r.Model,
 			PromptVersion: r.PromptVersion, PromptHash: r.PromptHash, InputSHA256: r.InputSHA256,
 			InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, DurationMS: int(r.Duration.Milliseconds()),
-			OK: r.Err == nil, Error: msg})
+			OK: r.Err == nil, Error: msg, Privacy: r.Privacy})
 	}
 	// The audit row must not be lost to a request that has just timed out.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -126,9 +128,23 @@ func (s *Server) extractClaim(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 	org := orgFrom(r.Context())
-	x, run, err := assist.ReadClaimForm(ctx, rt, doc, engine.Thresholds[claim.OriginAIExtracted])
+	ocr := s.OCR
+	if ocr == nil {
+		ocr = deid.Local{}
+	}
+	x, run, err := assist.ReadClaimForm(ctx, rt, ocr, doc, engine.Thresholds[claim.OriginAIExtracted])
 	if run.Task != "" {
 		s.recordRuns(r.Context(), org.ID, []assist.Run{run})
+	}
+	switch {
+	case errors.Is(err, deid.ErrNameNotFound):
+		writeError(w, http.StatusUnprocessableEntity, "cannot_deidentify",
+			"We could not find where the patient's name is on this form, so it was not sent to the model. Try a clearer scan, or enter the claim.", nil)
+		return
+	case errors.Is(err, deid.ErrNoOCR):
+		s.Logger.ErrorContext(r.Context(), "reading a claim form", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "ocr_unavailable", "Form reading is not available on this server. Enter the claim, or upload a spreadsheet.", nil)
+		return
 	}
 	if err != nil {
 		s.Logger.WarnContext(r.Context(), "reading a claim form", "err", err, slog.String("org", org.ID))
@@ -140,7 +156,17 @@ func (s *Server) extractClaim(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, x)
+	out := struct {
+		assist.Extraction
+		RedactedPages []string `json:"redacted_pages,omitempty"`
+	}{Extraction: x}
+	// What the model saw, for a person to see that the identity was hidden.
+	if r.URL.Query().Get("include") == "redacted_pages" {
+		for _, p := range x.Pages {
+			out.RedactedPages = append(out.RedactedPages, "data:image/png;base64,"+base64.StdEncoding.EncodeToString(p))
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // readDocument takes the file from a multipart form field "file", or the

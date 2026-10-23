@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/harrisyn/payahub/internal/ai"
+	"github.com/harrisyn/payahub/internal/deid"
 )
 
 // Completer answers a model request; ai.Router is one.
@@ -35,6 +36,7 @@ type Run struct {
 	InputTokens   int64
 	OutputTokens  int64
 	Duration      time.Duration
+	Privacy       deid.Report // what the de-identifier removed before the call
 	Err           error
 }
 
@@ -53,7 +55,7 @@ func sha(b []byte) string {
 
 // call sends r and records the run. The answer is decoded into out.
 func call(ctx context.Context, c Completer, r ai.Request, version string, input []byte, out any) Run {
-	run := Run{Task: r.Task, PromptVersion: version, PromptHash: promptHash(r.System, r.Schema), InputSHA256: sha(input)}
+	run := Run{Task: r.Task, PromptVersion: version, PromptHash: promptHash(r.System, r.Schema), InputSHA256: sha(input), Privacy: r.Cleared.Report}
 	start := time.Now()
 	res, err := c.Complete(ctx, r)
 	run.Duration = time.Since(start)

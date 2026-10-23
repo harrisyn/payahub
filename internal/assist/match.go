@@ -9,6 +9,7 @@ import (
 	"github.com/harrisyn/payahub/internal/ai"
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
+	"github.com/harrisyn/payahub/internal/deid"
 )
 
 // MatchPrompt is the version of the matching instructions. Change it with
@@ -104,10 +105,14 @@ func matchBatchOf(ctx context.Context, c Completer, cat string, batch []Own) (ma
 		fmt.Fprintf(&list, "%s | %s | %s\n", oneLine(o.Code), oneLine(o.Name), o.Kind)
 		asked[o.Code] = o
 	}
+	// A price list names no patient; it is scrubbed all the same.
+	catText, c1 := deid.Catalogue(cat)
+	listText, c2 := deid.Catalogue(list.String())
 	req := ai.Request{
 		Task:       ai.TaskCodeMatching,
 		System:     matchSystem,
-		Parts:      []ai.Part{ai.Text(cat), ai.Text(list.String())},
+		Parts:      []ai.Part{ai.Text(catText), ai.Text(listText)},
+		Cleared:    deid.Join(c1, c2),
 		Schema:     matchSchema,
 		SchemaName: "item_matches",
 		MaxTokens:  8000,

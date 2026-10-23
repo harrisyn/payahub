@@ -1,14 +1,20 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/harrisyn/payahub/internal/deid"
 )
 
 type seen struct {
@@ -32,12 +38,54 @@ func fake(t *testing.T, status int, reply string) (*httptest.Server, *seen) {
 	return srv, s
 }
 
-var form = Request{
-	System: "Read the claim form.",
-	Parts:  []Part{{MediaType: "application/pdf", Data: []byte("%PDF-1.4"), Name: "form.pdf"}, Text("Extract the member number.")},
-	Schema: map[string]any{"type": "object", "properties": map[string]any{"member_number": map[string]any{"type": "string"}},
-		"required": []string{"member_number"}, "additionalProperties": false},
-	SchemaName: "claim_form",
+// nameOCR finds a "Name:" label at the top of any page.
+type nameOCR struct{}
+
+func (nameOCR) Words(context.Context, image.Image) ([]deid.Word, error) {
+	return []deid.Word{{Text: "Name:", Box: image.Rect(2, 2, 20, 10), Line: "1"}}, nil
+}
+
+// form is a redacted page and a scrubbed instruction: what the de-identifier
+// lets through.
+var form = func() Request {
+	var b bytes.Buffer
+	_ = png.Encode(&b, image.NewGray(image.Rect(0, 0, 60, 40)))
+	red, err := deid.Redact(context.Background(), nameOCR{}, b.Bytes(), "image/png", deid.Identity{})
+	if err != nil {
+		panic(err)
+	}
+	text, c := deid.Catalogue("Extract the member number.")
+	return Request{
+		System: "Read the claim form.",
+		Parts:  []Part{{MediaType: "image/png", Data: red.Pages[0], Name: "form.png"}, Text(text)},
+		Schema: map[string]any{"type": "object", "properties": map[string]any{"member_number": map[string]any{"type": "string"}},
+			"required": []string{"member_number"}, "additionalProperties": false},
+		SchemaName: "claim_form",
+		Cleared:    deid.Join(red.Cleared, c),
+	}
+}()
+
+func hi() Request {
+	t, c := deid.Catalogue("hi")
+	return Request{Parts: []Part{Text(t)}, Cleared: c}
+}
+
+func TestNothingUnscrubbedIsSent(t *testing.T) {
+	srv, s := fake(t, 200, `{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"ok"}}],"usage":{}}`)
+	p, _ := New(Config{ID: "x", Kind: OpenAICompatible, Model: "m", BaseURL: srv.URL})
+	raw := Request{Parts: []Part{Text("Patient Kwame Mensah, NHIS 48211907")}}
+	if _, err := p.Complete(context.Background(), raw); !errors.Is(err, ErrNotDeidentified) {
+		t.Fatalf("raw text: %v", err)
+	}
+	// A cleared request with one more part added after scrubbing.
+	r := form
+	r.Parts = append(slices.Clone(r.Parts), Part{MediaType: "application/pdf", Data: []byte("%PDF-1.4")})
+	if _, err := (Router{Providers: []Provider{p}}).Complete(context.Background(), r); !errors.Is(err, ErrNotDeidentified) {
+		t.Fatalf("added file: %v", err)
+	}
+	if s.path != "" {
+		t.Fatalf("something was sent")
+	}
 }
 
 func TestClaudeSendsDocumentsAndSchema(t *testing.T) {
@@ -63,7 +111,7 @@ func TestClaudeSendsDocumentsAndSchema(t *testing.T) {
 		t.Fatalf("output_config: %v", oc)
 	}
 	content := s.body["messages"].([]any)[0].(map[string]any)["content"].([]any)
-	if content[0].(map[string]any)["type"] != "document" || content[1].(map[string]any)["type"] != "text" {
+	if content[0].(map[string]any)["type"] != "image" || content[1].(map[string]any)["type"] != "text" {
 		t.Fatalf("content: %v", content)
 	}
 	if _, ok := s.body["fallbacks"]; ok {
@@ -103,8 +151,8 @@ func TestOpenAISchemaAndCompatibleObjectMode(t *testing.T) {
 		t.Fatalf("body: %v", s.body)
 	}
 	parts := s.body["messages"].([]any)[1].(map[string]any)["content"].([]any)
-	if f := parts[0].(map[string]any)["file"].(map[string]any); !strings.HasPrefix(f["file_data"].(string), "data:application/pdf;base64,") {
-		t.Fatalf("pdf part: %v", parts[0])
+	if f := parts[0].(map[string]any)["image_url"].(map[string]any); !strings.HasPrefix(f["url"].(string), "data:image/png;base64,") {
+		t.Fatalf("image part: %v", parts[0])
 	}
 
 	srv2, s2 := fake(t, 200, `{"model":"llama","choices":[{"finish_reason":"stop","message":{"content":"{}"}}],"usage":{}}`)
@@ -134,11 +182,11 @@ func TestRouterFallsThroughOnlyWhenAnotherMightAnswer(t *testing.T) {
 		p, _ := New(Config{ID: id, Kind: OpenAICompatible, Model: "m", BaseURL: url})
 		return p
 	}
-	res, err := Router{Providers: []Provider{mk("down", down.URL), mk("up", up.URL)}}.Complete(context.Background(), Request{Parts: []Part{Text("hi")}})
+	res, err := Router{Providers: []Provider{mk("down", down.URL), mk("up", up.URL)}}.Complete(context.Background(), hi())
 	if err != nil || res.Provider != "up" {
 		t.Fatalf("rate-limited provider not skipped: %v %+v", err, res)
 	}
-	if _, err := (Router{Providers: []Provider{mk("bad", bad.URL), mk("up", up.URL)}}).Complete(context.Background(), Request{Parts: []Part{Text("hi")}}); err == nil {
+	if _, err := (Router{Providers: []Provider{mk("bad", bad.URL), mk("up", up.URL)}}).Complete(context.Background(), hi()); err == nil {
 		t.Fatalf("a request error was retried elsewhere")
 	}
 	if _, err := (Router{}).Complete(context.Background(), Request{}); !errors.Is(err, ErrNoProvider) {

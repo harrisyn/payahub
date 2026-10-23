@@ -475,6 +475,14 @@ paths:
         it was read from, and needs_review when it is below the threshold for read fields (0.90).
         Check the marked fields, then create the claim with POST /v1/claims. Every model call is
         recorded with its model and prompt version; the document is not stored.
+
+        The model never sees who the patient is. The form is read on Payahub's server first, and the
+        patient's name, member, policy and card numbers, date of birth, phone and address are blacked
+        out; the model gets only those blacked-out pages, as images. The hidden details are read on the
+        server and returned marked needs_review. A form on which the patient's name label cannot be
+        found is not sent to the model (422 cannot_deidentify).
+      parameters:
+        - { name: include, in: query, schema: { enum: [redacted_pages] }, description: Also return the pages as the model saw them }
       requestBody:
         required: true
         content:
@@ -507,6 +515,16 @@ paths:
                   payer_name: { type: string, description: The insurer as written }
                   review: { type: integer, description: How many fields need a person }
                   evidence: { $ref: "#/components/schemas/Evidence" }
+                  privacy:
+                    type: object
+                    description: What was blacked out before the model saw the form (kinds and counts, never values)
+                    properties:
+                      method: { type: string }
+                      removed: { type: object, additionalProperties: { type: integer } }
+                      pages: { type: integer }
+                  redacted_pages: { type: array, items: { type: string, description: A data:image/png URL } }
+        "422": { description: The patient's identity could not be found on the form, so it was not read, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: Form reading is not available on this server, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "409": { description: No model is set up to read documents, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "413": { $ref: "#/components/responses/Error" }
         "415": { description: Not a PDF, PNG, JPEG or WebP file, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }

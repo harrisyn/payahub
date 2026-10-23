@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/harrisyn/payahub/internal/ai"
+	"github.com/harrisyn/payahub/internal/deid"
 	"github.com/harrisyn/payahub/internal/store"
 )
 
@@ -158,9 +159,11 @@ func (s *Server) checkAIProvider(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		start := time.Now()
 		var res ai.Response
+		ask, cleared := deid.Catalogue(`Answer with {"ok": true}.`)
 		res, err = prov.Complete(ctx, ai.Request{
 			System:     "You are checking that an integration works.",
-			Parts:      []ai.Part{ai.Text(`Answer with {"ok": true}.`)},
+			Parts:      []ai.Part{ai.Text(ask)},
+			Cleared:    cleared,
 			Schema:     map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}, "required": []string{"ok"}, "additionalProperties": false},
 			SchemaName: "check",
 			MaxTokens:  2000,

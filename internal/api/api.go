@@ -16,6 +16,7 @@ import (
 
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
+	"github.com/harrisyn/payahub/internal/deid"
 	"github.com/harrisyn/payahub/internal/icd10"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
@@ -29,6 +30,9 @@ type Server struct {
 	Queue  *queue.Client
 	Vault  *vault.Vault
 	Logger *slog.Logger
+	// OCR reads forms on this server to black out the patient's identity
+	// before a model sees them; nil uses the installed Tesseract.
+	OCR deid.OCR
 }
 
 func (s *Server) Handler() http.Handler {

@@ -316,6 +316,9 @@ export type Extraction = {
   payer_name?: string;
   review: number;
   evidence: { model_version?: string; prompt_version?: string; confidence?: number };
+  // What was blacked out on Payahub's server before the model saw the form.
+  privacy?: { method: string; removed?: Record<string, number>; pages?: number };
+  redacted_pages?: string[];
 };
 
 export type AIUsage = {

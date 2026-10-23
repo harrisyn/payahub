@@ -519,3 +519,10 @@ object.app-read__view { height: min(78vh, 900px); }
 }
 /* A select in a table cell shrinks with the cell instead of running off the card. */
 .app-table td select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+
+/* Reading a form: the blacked-out copy the model saw, or the person's file. */
+.app-read__views { margin-top: 16px; }
+.app-segment button { font: inherit; padding: 6px 12px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; font-weight: 500; color: var(--a-muted); cursor: pointer; }
+.app-segment button[aria-pressed="true"] { background: var(--sheet); color: var(--text); box-shadow: 0 1px 2px rgba(20, 10, 38, 0.08); }
+.app-segment button:focus-visible { outline: 2px solid var(--hue); outline-offset: 1px; }
+.app-read__privacy { margin: 12px 0 0; font-size: var(--step-small); color: var(--muted); max-width: 60ch; }

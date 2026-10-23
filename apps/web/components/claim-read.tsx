@@ -85,6 +85,7 @@ export function ClaimReader({ payers }: { payers: Payer[] }) {
     [preview],
   );
   const x = read.extraction;
+  const [view, setView] = useState<"model" | "file">("model");
   // The save action is given what was read, so a retry reuses its key.
   const s: ReadState = { ...read, ...saved };
 
@@ -126,7 +127,52 @@ export function ClaimReader({ payers }: { payers: Payer[] }) {
             <Messages state={{ error: read.error }} />
           </div>
         </form>
+        {x?.redacted_pages?.length ? (
+          <div className="app-read__views">
+            <div
+              className="app-segment"
+              role="group"
+              aria-label="Which copy to show"
+            >
+              <button
+                type="button"
+                aria-pressed={view === "model"}
+                onClick={() => setView("model")}
+              >
+                What the model saw
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "file"}
+                onClick={() => setView("file")}
+              >
+                Your file
+              </button>
+            </div>
+            {view === "model" && (
+              <>
+                <p className="app-read__privacy">
+                  The patient&rsquo;s name, numbers, date of birth, phone and
+                  address were blacked out on Payahub&rsquo;s server before the
+                  model saw the form. Sex, age, diagnoses and the bill were left
+                  in. The hidden details were read here, and are marked for you
+                  to check.
+                </p>
+                {x.redacted_pages.map((src, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={i}
+                    src={src}
+                    alt={`Page ${i + 1} as the model saw it`}
+                    className="app-read__view"
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        ) : null}
         {preview &&
+          (!x?.redacted_pages?.length || view === "file") &&
           (preview.pdf ? (
             <object
               data={preview.url}

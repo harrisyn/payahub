@@ -72,7 +72,7 @@ func setup(t testing.TB) env {
 			return
 		}
 		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
-		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler())
+		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, OCR: formOCR{}}).Handler())
 	})
 	if setupErr != nil {
 		t.Fatal(setupErr)
