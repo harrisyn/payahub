@@ -835,6 +835,72 @@ paths:
       responses:
         "201": { description: Posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
         "200": { description: A repeat; nothing posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/operator/ai-providers:
+    get:
+      security: [{ session: [] }]
+      summary: Model providers, the tasks they serve and the default Claude model (operators only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIProvider" } }
+                  tasks: { type: array, items: { type: string, enum: [document_intake, code_matching] } }
+                  default_models: { type: object, additionalProperties: { type: string } }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/operator/ai-providers/{id}:
+    put:
+      security: [{ session: [] }]
+      summary: Create or change a model provider (operators only)
+      description: |
+        The key is write-only: it is sealed on save and never returned. Leave api_key empty to keep
+        the saved one. A change clears the last check. Each task tries its enabled providers by
+        ascending priority and moves to the next on an outage or a refusal.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9_-]{1,39}$" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, name, model]
+              properties:
+                kind: { type: string, enum: [anthropic, openai, openai_compatible] }
+                name: { type: string }
+                base_url: { type: string, description: "Required for openai_compatible; https, or http on localhost" }
+                model: { type: string, example: claude-opus-5-5 }
+                effort: { type: string, enum: [low, medium, high, xhigh, max], description: Claude only; default high }
+                json_mode: { type: string, enum: [schema, object, none], description: OpenAI and compatible only; default schema }
+                tasks: { type: array, items: { type: string, enum: [document_intake, code_matching] } }
+                priority: { type: integer, minimum: 0, maximum: 1000 }
+                enabled: { type: boolean, default: true }
+                api_key: { type: string, writeOnly: true, description: Required for anthropic and openai on create }
+      responses:
+        "200": { description: Changed, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      security: [{ session: [] }]
+      summary: Remove a model provider and its sealed key (operators only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/operator/ai-providers/{id}/check:
+    post:
+      security: [{ session: [] }]
+      summary: Ask the provider one small structured question and record whether it answered (operators only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The provider with check_ok and check_message set, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/operator/ledger:
     get:
       security: [{ session: [] }]
@@ -1078,6 +1144,25 @@ components:
         bank_name: { type: string }
         account_number: { type: string }
         currency: { type: string }
+    AIProvider:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [anthropic, openai, openai_compatible] }
+        name: { type: string }
+        base_url: { type: string }
+        model: { type: string }
+        effort: { type: string }
+        json_mode: { type: string }
+        tasks: { type: array, items: { type: string } }
+        priority: { type: integer }
+        enabled: { type: boolean }
+        has_key: { type: boolean }
+        key_hint: { type: string, description: Last four characters of the saved key }
+        checked_at: { type: string, format: date-time }
+        check_ok: { type: boolean }
+        check_message: { type: string }
+        updated_at: { type: string, format: date-time }
     Withdrawal:
       type: object
       properties:

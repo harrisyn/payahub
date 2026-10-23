@@ -54,7 +54,10 @@ each with contract tests against a recorded copy of the platform's API.
 ## 4. AI translation and matching
 
 - [x] Rule: no model output reaches a payer; AI-set fields carry evidence; below threshold goes to review
-- [~] Code suggestion: word matching today, no model
+- [x] Model providers: Claude (Messages API, structured output, effort, server-side fallback), OpenAI
+      and any OpenAI-compatible endpoint; each task tries its providers in order and fails over on
+      outages or refusals; keys sealed in the vault, set and checked by operators in the console
+- [~] Code suggestion: word matching today; the model router is ready to plug in
 - [ ] Model-backed matching (clinic item → standard item, standard → payer code, diagnosis text → ICD-10)
       with evidence, per-use thresholds, and the model and prompt version logged on every decision
 - [ ] Review queue in the console for low-confidence lines
@@ -90,5 +93,5 @@ each with contract tests against a recorded copy of the platform's API.
 
 - Read access to Serenity's database, for the real payer list and mappings
 - Test accounts on XCeli, Medserve, SmartClaims, RX Insurance and ClaimIQ
-- An AI provider key, and agreement on which provider sees claim data
+- An AI provider key (entered in the console under AI models), and agreement on which provider sees claim data
 - Final name, prices and contact email

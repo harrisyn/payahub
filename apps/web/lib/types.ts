@@ -252,3 +252,24 @@ export type LedgerView = {
   wallets: Record<string, number>;
   balanced: boolean;
 };
+
+export type AIKind = "anthropic" | "openai" | "openai_compatible";
+
+export type AIProvider = {
+  id: string;
+  kind: AIKind;
+  name: string;
+  base_url: string;
+  model: string;
+  effort: string;
+  json_mode: string;
+  tasks: string[];
+  priority: number;
+  enabled: boolean;
+  has_key: boolean;
+  key_hint: string;
+  checked_at?: string;
+  check_ok?: boolean;
+  check_message?: string;
+  updated_at: string;
+};

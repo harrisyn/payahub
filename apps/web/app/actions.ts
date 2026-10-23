@@ -5,9 +5,15 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { api, SESSION_COOKIE } from "@/lib/api";
-import type { APIKey, Funding, Method, PayoutAccount, Profile, Suggestion, Withdrawal } from "@/lib/types";
+import type { AIProvider, APIKey, Funding, Method, PayoutAccount, Profile, Suggestion, Withdrawal } from "@/lib/types";
 
-export type FormState = { error?: string; fields?: Record<string, string>; ok?: string };
+export type FormState = {
+  error?: string;
+  fields?: Record<string, string>;
+  ok?: string;
+  // What was submitted, for a form that puts it back after a failed save.
+  values?: Record<string, string | string[] | number | boolean>;
+};
 
 // A key is shown once, right after it is made: it rides in a short-lived
 // httpOnly cookie to the next page, which shows it until it is dismissed.
@@ -589,4 +595,54 @@ export async function decideWithdrawal(_: FormState, form: FormData): Promise<Fo
   }
   revalidatePath("/console/operator/withdrawals");
   return { ok: approve ? "Approved; the payout is on its way." : "Rejected; the amount is back in their wallet." };
+}
+
+// saveAIProvider creates or changes a model provider. The key field is left
+// empty to keep the sealed key.
+export async function saveAIProvider(_: FormState, form: FormData): Promise<FormState> {
+  const id = text(form, "id").toLowerCase();
+  const values = {
+    id,
+    kind: text(form, "kind"),
+    name: text(form, "name"),
+    base_url: text(form, "base_url"),
+    model: text(form, "model"),
+    effort: text(form, "effort"),
+    json_mode: text(form, "json_mode"),
+    tasks: form.getAll("tasks").map(String),
+    priority: text(form, "priority"),
+    enabled: form.get("enabled") === "on",
+  };
+  const res = await api<AIProvider>(`/v1/operator/ai-providers/${encodeURIComponent(id || "_")}`, {
+    method: "PUT",
+    body: {
+      kind: text(form, "kind"),
+      name: text(form, "name"),
+      base_url: text(form, "base_url"),
+      model: text(form, "model"),
+      effort: text(form, "effort"),
+      json_mode: text(form, "json_mode"),
+      tasks: form.getAll("tasks").map(String),
+      priority: Number(text(form, "priority") || 0),
+      enabled: form.get("enabled") === "on",
+      api_key: text(form, "api_key"),
+    },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined, values };
+  }
+  revalidatePath("/console/operator/ai");
+  redirect(`/console/operator/ai?saved=${encodeURIComponent(res.data.id)}`);
+}
+
+export async function checkAIProvider(form: FormData) {
+  await api(`/v1/operator/ai-providers/${encodeURIComponent(text(form, "id"))}/check`, { method: "POST" });
+  revalidatePath("/console/operator/ai");
+}
+
+export async function deleteAIProvider(form: FormData) {
+  await api(`/v1/operator/ai-providers/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  revalidatePath("/console/operator/ai");
+  redirect("/console/operator/ai");
 }

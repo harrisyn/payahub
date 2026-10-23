@@ -18,6 +18,7 @@ const items = [
 const operatorItems = [
   { href: "/console/operator", label: "Catalogue" },
   { href: "/console/operator/withdrawals", label: "Withdrawals" },
+  { href: "/console/operator/ai", label: "AI models" },
 ];
 
 export function ConsoleNav({ operator = false }: { operator?: boolean }) {
