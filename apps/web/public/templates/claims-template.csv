@@ -1,0 +1,4 @@
+Claim No,Payer,Member No,Patient Name,Visit Date,Visit Type,Diagnosis,Item Code,Description,Qty,Unit Price
+INV-1001,Sandbox Mutual,M-10021,Ama Boateng,21/10/2026,OPD,B50.9;R50.9,SRV-0001,GP consultation,1,150.00
+INV-1001,,,,,,,MED-0003,Artemether and lumefantrine 20/120 mg tablet,24,2.50
+INV-1002,Sandbox Mutual,M-10088,Kojo Asante,21/10/2026,OPD,J06.9,SRV-0001,GP consultation,1,150.00

@@ -460,3 +460,47 @@ export async function importPayers(_: PayerImportState, form: FormData): Promise
     ok: `${res.data.saved} ${res.data.saved === 1 ? "payer" : "payers"} saved.`,
   };
 }
+
+export type ImportedClaim = {
+  reference: string;
+  rows: number[];
+  payer_id?: string;
+  member_number?: string;
+  lines: number;
+  total: number;
+  currency?: string;
+  errors: { field: string; message: string }[];
+  issues: { code: string; severity: "error" | "warning" | "review"; field: string; message: string }[];
+  state?: "draft" | "needs_review" | "ready";
+  claim_id?: string;
+  replayed?: boolean;
+  queued?: boolean;
+};
+export type ClaimUploadState = FormState & { claims?: ImportedClaim[]; file?: string; saved?: boolean };
+
+// uploadClaims checks a file of claim lines first (nothing saved) and keeps
+// it, so what is saved is exactly what the person saw.
+export async function uploadClaims(_: ClaimUploadState, form: FormData): Promise<ClaimUploadState> {
+  const upload = form.get("upload");
+  let file = text(form, "file");
+  if (upload instanceof File && upload.size > 0) {
+    if (upload.size > 16 << 20) return { error: "The file is over 16 MB. Split it and upload each part." };
+    file = Buffer.from(await upload.arrayBuffer()).toString("base64");
+  }
+  if (!file) return { error: "Choose a CSV or Excel file of claim lines." };
+  const intent = text(form, "intent");
+  const res = await api<{ claims: ImportedClaim[]; ready: number }>("/v1/claims/import", {
+    method: "POST",
+    body: { file, dry_run: intent === "check", submit: intent === "send" },
+  });
+  if (!res.ok) return { error: res.error.message };
+  if (intent === "check") return { claims: res.data.claims, file };
+  revalidatePath("/console", "layout");
+  const saved = res.data.claims.filter((c) => c.claim_id).length;
+  const queued = res.data.claims.filter((c) => c.queued).length;
+  return {
+    claims: res.data.claims,
+    saved: true,
+    ok: `${saved} ${saved === 1 ? "claim" : "claims"} saved${queued ? `, ${queued} sent to the insurer` : ""}.`,
+  };
+}

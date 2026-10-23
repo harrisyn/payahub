@@ -552,3 +552,11 @@ func (s *Store) HasAcknowledgedClaim(ctx context.Context, orgID, env string) (bo
 		orgID, env, billableStates()).Scan(&ok)
 	return ok, err
 }
+
+// OrgName is the organisation's name, the default provider on claims it
+// uploads.
+func (s *Store) OrgName(ctx context.Context, orgID string) (string, error) {
+	var name string
+	err := s.Pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&name)
+	return name, err
+}

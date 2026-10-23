@@ -39,7 +39,7 @@ func TestOnlyOperatorsChangeTheCatalogue(t *testing.T) {
 func TestOperatorAddsAPayerLoadsItsListAndMapsCodes(t *testing.T) {
 	e := setup(t)
 	op := operatorSession(t, e)
-	id := "acacia_" + strings.ToLower(store.NewID("t")[2:10])
+	id := "acacia_" + strings.ReplaceAll(store.NewID("t"), "-", "")[22:34] // the random tail of a UUIDv7
 
 	if s, out := op.do(t, "PUT", "/v1/operator/payers/"+id, map[string]any{
 		"name": "Acacia Health", "country": "gh", "connector": "medserve", "fields": map[string]any{"nope": "x"},

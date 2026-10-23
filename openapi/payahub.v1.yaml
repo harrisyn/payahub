@@ -435,6 +435,59 @@ paths:
         "200": { description: Replay of an earlier request with the same Idempotency-Key }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/import:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Import claims from a CSV or Excel file of claim lines
+      description: |
+        One row per claim line; rows with the same claim reference make one claim. The header row needs
+        a claim reference, payer (id or name), member number and visit date, and an item code or a
+        description on each line; patient name, visit type, provider, diagnosis (`;`-separated, primary
+        first), authorisation, quantity, unit price and currency are read when present. A line with no
+        price takes it from the price list. Each claim is validated exactly as `POST /v1/claims`.
+        With `dry_run` nothing is saved. Otherwise each readable claim is saved under an idempotency key
+        derived from the file and the claim's rows, so uploading the same file again creates nothing
+        new; with `submit`, claims that pass their checks are also queued for sending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: byte, description: The .csv or .xlsx file, base64 }
+                dry_run: { type: boolean }
+                submit: { type: boolean }
+      responses:
+        "200":
+          description: Every claim in the file, with what happened to it
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  ready: { type: integer, description: Claims that pass every check }
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        reference: { type: string }
+                        rows: { type: array, items: { type: integer } }
+                        payer_id: { type: string }
+                        member_number: { type: string }
+                        lines: { type: integer }
+                        total: { type: integer, description: Minor units }
+                        currency: { type: string }
+                        errors: { type: array, items: { type: object, properties: { field: { type: string }, message: { type: string } } } }
+                        issues: { $ref: "#/components/schemas/Validation/properties/issues" }
+                        state: { type: string }
+                        claim_id: { type: string }
+                        replayed: { type: boolean }
+                        queued: { type: boolean }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/claims/validate:
     post:
       summary: Dry run of the edit rules and submission plan; nothing is stored or sent
@@ -593,6 +646,48 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/OperatorPayer" } }
         "403": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers/import:
+    post:
+      security: [{ session: [] }]
+      summary: Import payers from an export of Serenity's payers (operators only)
+      description: |
+        Columns: name, platform, external_reference_id, country, is_active (the query is in
+        docs/serenity-payers.md). Each row is planned as add, fill (a missing setting), same, conflict
+        or skip; settings already in the catalogue are never overwritten. With `dry_run` nothing is saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: byte, description: The .csv or .xlsx file, base64 }
+                dry_run: { type: boolean }
+      responses:
+        "200":
+          description: The plan for each row, and how many payers were saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  saved: { type: integer }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        line: { type: integer }
+                        id: { type: string }
+                        name: { type: string }
+                        connector: { type: string }
+                        action: { enum: [add, fill, same, conflict, skip] }
+                        fields: { type: object, additionalProperties: { type: string } }
+                        reason: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/operator/payers/{id}:
     put:
       security: [{ session: [] }]

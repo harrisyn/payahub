@@ -10,8 +10,9 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 
 - [x] One shared payer catalogue, each payer standalone or behind a platform (ADR in PR #2)
 - [x] A clinic picks a payer and adds its platform account once; credentials sealed, write-only
-- [ ] The real payer list: every payer Serenity reaches today, its platform and its insurer code
-      (blocked: needs read access to Serenity's database)
+- [x] Payer import: operators load an export of Serenity's payers (CSV or Excel), check what each row
+      will do, then import; existing settings are never overwritten (export query in docs/serenity-payers.md)
+- [ ] Run the export on Serenity's database and import the real payer list (needs someone with DB access)
 - [x] Operator console: add and edit payers, their platform fields and code lists without a deploy
       (catalogue in the database, seeded once from the JSON files; every process refreshes within 5s;
       change history per payer; `payahub operator EMAIL` grants the role)
@@ -58,7 +59,8 @@ each with contract tests against a recorded copy of the platform's API.
       with evidence, per-use thresholds, and the model and prompt version logged on every decision
 - [ ] Review queue in the console for low-confidence lines
 - [ ] Regression checks: a changed input must change the output; known pairs must keep their answer
-- [ ] Intake: spreadsheet upload of claims
+- [x] Intake: spreadsheet upload of claims (CSV or Excel, one row per line, checked before saving,
+      re-uploads create nothing new, ready claims can be sent straight away; template in the console)
 - [ ] Intake: PDF and photo of a paper claim form, extracted then reviewed
 
 ## 5. Checks before sending
