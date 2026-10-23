@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	s.priceRoutes(mux)
 	s.walletRoutes(mux)
 	s.aiRoutes(mux)
+	s.assistRoutes(mux)
 	return mux
 }
 

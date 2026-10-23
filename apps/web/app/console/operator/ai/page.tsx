@@ -7,7 +7,7 @@ import { taskName } from "@/lib/ai";
 import { api } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 import { requireOperator } from "@/lib/session";
-import type { AIProvider } from "@/lib/types";
+import type { AIProvider, AIUsage } from "@/lib/types";
 
 export const metadata = { title: "AI models" };
 
@@ -30,6 +30,10 @@ export default async function AIModels({
     default_models: Record<string, string>;
   }>("/v1/operator/ai-providers");
   if (!res.ok) throw new Error(res.error.message);
+  const ur = await api<{ data: AIUsage[]; days: number }>(
+    "/v1/operator/ai-usage",
+  );
+  const usage = ur.ok ? ur.data.data : [];
   const { data: providers, tasks, default_models } = res.data;
   const editing = edit ? providers.find((p) => p.id === edit) : undefined;
   const justSaved = saved ? providers.find((p) => p.id === saved) : undefined;
@@ -188,6 +192,62 @@ export default async function AIModels({
           )}
         </section>
       </div>
+
+      <section className="app-card" aria-labelledby="use-h">
+        <h2 id="use-h" className="app-card__title">
+          Use in the last 30 days
+        </h2>
+        {usage.length ? (
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th scope="col">Task</th>
+                <th scope="col">Model</th>
+                <th scope="col" className="app-right">
+                  Calls
+                </th>
+                <th scope="col" className="app-right">
+                  Failed
+                </th>
+                <th scope="col" className="app-right">
+                  Tokens in / out
+                </th>
+                <th scope="col" className="app-right">
+                  Average time
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.map((u) => (
+                <tr key={`${u.task}-${u.provider}-${u.model}`}>
+                  <td>{taskName[u.task]?.[0] ?? u.task}</td>
+                  <td>
+                    {u.model || <span className="app-muted">No answer</span>}
+                    {u.provider && (
+                      <span className="app-muted"> via {u.provider}</span>
+                    )}
+                  </td>
+                  <td className="app-right">
+                    {u.runs.toLocaleString("en-GH")}
+                  </td>
+                  <td className={`app-right${u.failed ? " field__error" : ""}`}>
+                    {u.failed.toLocaleString("en-GH")}
+                  </td>
+                  <td className="app-right app-nowrap">
+                    {u.input_tokens.toLocaleString("en-GH")} /{" "}
+                    {u.output_tokens.toLocaleString("en-GH")}
+                  </td>
+                  <td className="app-right">
+                    {(u.avg_ms / 1000).toFixed(1)} s
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="app-empty">No model has been asked anything yet.</p>
+        )}
+      </section>
     </div>
   );
 }

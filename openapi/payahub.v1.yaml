@@ -90,6 +90,13 @@ paths:
   /v1/items/suggest:
     post:
       summary: Suggest standard items for the organisation's own items. Nothing is saved.
+      description: |
+        When a model is set up for code matching, it picks first (source "model", with its reason and
+        evidence: model, prompt version and hash); the catalogue's word matching fills the remaining
+        places. A model can only pick an item that is in the catalogue, of the kind given. When no model
+        is set up, or every model fails, the suggestions are word matches only and method says so.
+      parameters:
+        - { name: method, in: query, schema: { type: string, enum: [auto, words], default: auto }, description: "words skips the model" }
       requestBody:
         required: true
         content:
@@ -126,6 +133,11 @@ paths:
                             properties:
                               item: { $ref: "#/components/schemas/Item" }
                               confidence: { type: number, minimum: 0, maximum: 1 }
+                              source: { type: string, enum: [words, model] }
+                              reason: { type: string, description: What the model read the item as }
+                              evidence: { $ref: "#/components/schemas/Evidence" }
+                  method: { type: string, enum: [words, model] }
+                  note: { type: string, description: Set when the model could not answer }
   /v1/item-mappings:
     get:
       summary: The organisation's own codes mapped to standard items
@@ -439,6 +451,53 @@ paths:
         "200": { description: Replay of an earlier request with the same Idempotency-Key }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/extract:
+    post:
+      summary: Read a claim form (a PDF or a photo) into a proposed claim. Nothing is saved.
+      description: |
+        A model reads the form; Payahub then checks every value. Dates and amounts must parse, ICD-10
+        codes must be in the list (a missing code is suggested from the diagnosis words and marked for
+        review), the insurer must match one catalogue payer, and each line's standard item comes from
+        the catalogue's own matching, never from the model. Each field reports its confidence, the words
+        it was read from, and needs_review when it is below the threshold for read fields (0.90).
+        Check the marked fields, then create the claim with POST /v1/claims. Every model call is
+        recorded with its model and prompt version; the document is not stored.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { file: { type: string, format: binary } }, required: [file] }
+          application/pdf: { schema: { type: string, format: binary } }
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        "200":
+          description: The proposed claim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claim: { $ref: "#/components/schemas/ClaimInput" }
+                  fields:
+                    type: object
+                    description: "By path: member.member_number, diagnoses.0.code, lines.2.unit_price"
+                    additionalProperties:
+                      type: object
+                      properties:
+                        confidence: { type: number }
+                        quote: { type: string }
+                        read: { type: string, description: The model's value when it was dropped or replaced }
+                        note: { type: string }
+                        needs_review: { type: boolean }
+                  payer_name: { type: string, description: The insurer as written }
+                  review: { type: integer, description: How many fields need a person }
+                  evidence: { $ref: "#/components/schemas/Evidence" }
+        "409": { description: No model is set up to read documents, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { description: Not a PDF, PNG, JPEG or WebP file, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { description: The model could not read the document, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /v1/claims/import:
     post:
       security: [{ apiKey: [] }, { session: [] }]
@@ -835,6 +894,13 @@ paths:
       responses:
         "201": { description: Posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
         "200": { description: A repeat; nothing posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/operator/ai-usage:
+    get:
+      security: [{ session: [] }]
+      summary: Model calls in the last 30 days per task and model, with failures, tokens and average time (operators only)
+      responses:
+        "200": { description: Usage }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/operator/ai-providers:
     get:
       security: [{ session: [] }]

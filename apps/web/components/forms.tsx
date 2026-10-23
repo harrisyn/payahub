@@ -378,16 +378,24 @@ export function MappingForm() {
                       <option value="">Skip for now</option>
                       {r.suggestions.map((sg) => (
                         <option key={sg.item.id} value={sg.item.id}>
-                          {itemLabel(sg.item)}, {Math.round(sg.confidence * 100)}% match
+                          {itemLabel(sg.item)}, {Math.round(sg.confidence * 100)}% {sg.source === "model" ? "sure" : "match"}
                         </option>
                       ))}
                     </select>
+                    {r.suggestions[0]?.source === "model" && r.suggestions[0].reason && (
+                      <p className="field__hint">Read as {r.suggestions[0].reason}.</p>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="app-muted">
+            {found.method === "model"
+              ? "A model matched these against the standard list, with word matching as the alternatives. "
+              : found.note
+                ? `${found.note} `
+                : ""}
             Matches of 60% or more are picked for you; check each one. Nothing is used on a claim until you save it.
           </p>
           <div className="app-form__foot">

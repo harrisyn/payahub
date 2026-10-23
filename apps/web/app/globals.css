@@ -490,3 +490,30 @@ a.app-id { color: var(--text); }
   .app-providers li { flex-direction: column; align-items: stretch; }
   .app-provider__side { justify-items: start; grid-auto-flow: column; justify-content: space-between; align-items: center; }
 }
+
+/* Reading a claim form */
+.app-read { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+.app-read__doc { position: sticky; top: 16px; }
+.app-read__view { display: block; width: 100%; height: auto; max-height: 78vh; object-fit: contain; object-position: top; margin-top: 16px;
+  border: 1px solid var(--rule); border-radius: 8px; background: #F6F4FA; }
+.app-read__row { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--rule); }
+.app-read__row:first-of-type { border-top: 0; }
+.app-read__row > * { min-width: 0; }
+.app-read__row input:not([type=checkbox]):not([type=radio]) { width: 100%; box-sizing: border-box; }
+object.app-read__view { height: min(78vh, 900px); }
+.app-read__row--line { grid-template-columns: 1fr 80px 140px auto; }
+.app-read__opts { display: grid; gap: 6px; padding-top: 30px; font-size: var(--step-small); }
+.app-choice--plain { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.field--check input, .field--check select { border-color: #D97706; box-shadow: 0 0 0 1px #D97706; }
+.field__check { font-size: var(--step-small); color: #6B4A06; margin: 4px 0 0; }
+.field__check .app-pill { font-size: 11px; padding: 1px 6px; }
+@media (max-width: 900px) {
+  .app-read { grid-template-columns: 1fr; }
+  .app-read__doc { position: static; }
+  .app-read__view { height: 60vh; }
+}
+@media (max-width: 640px) {
+  .app-read__row, .app-read__row--line { grid-template-columns: 1fr 1fr; }
+  .app-read__opts, .app-read__item { grid-column: 1 / -1; }
+  .app-read__opts { padding-top: 0; grid-auto-flow: column; justify-content: start; gap: 16px; }
+}

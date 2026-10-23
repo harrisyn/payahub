@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"github.com/harrisyn/payahub/internal/assist"
 	"net/http"
 	"strconv"
 	"strings"
@@ -137,13 +138,35 @@ func (s *Server) suggestItems(w http.ResponseWriter, r *http.Request) {
 	}
 	type result struct {
 		ownItem
-		Suggestions []catalog.Suggestion `json:"suggestions"`
+		Suggestions []suggestion `json:"suggestions"`
+	}
+	// A model, when one is set up for matching, picks first; the catalogue's
+	// word matching fills in and stands in when no model can answer.
+	method, note := "words", ""
+	var picks map[string]assist.Pick
+	if r.URL.Query().Get("method") != "words" {
+		own := make([]assist.Own, len(in.Items))
+		for i, it := range in.Items {
+			own[i] = assist.Own{Code: it.Code, Name: it.Name, Kind: it.Kind}
+		}
+		var err error
+		if picks, err = s.modelPicks(r.Context(), orgFrom(r.Context()).ID, own); err != nil {
+			s.Logger.WarnContext(r.Context(), "model matching failed; using word matching", "err", err)
+			note = "The model could not answer, so these are word matches only."
+		} else if picks != nil {
+			method = "model"
+		}
 	}
 	out := make([]result, 0, len(in.Items))
 	for _, it := range in.Items {
-		out = append(out, result{it, catalog.Suggest(it.Name, it.Kind, 3)})
+		p, picked := picks[it.Code]
+		out = append(out, result{it, mergeSuggestions(p, picked, catalog.Suggest(it.Name, it.Kind, 3), 3)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	resp := map[string]any{"data": out, "method": method}
+	if note != "" {
+		resp["note"] = note
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) listItemMappings(w http.ResponseWriter, r *http.Request) {

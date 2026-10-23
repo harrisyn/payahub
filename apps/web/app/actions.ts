@@ -5,7 +5,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { api, SESSION_COOKIE } from "@/lib/api";
-import type { AIProvider, APIKey, Funding, Method, PayoutAccount, Profile, Suggestion, Withdrawal } from "@/lib/types";
+import type { AIProvider, APIKey, ClaimInput, Extraction, Funding, Method, PayoutAccount, Profile, Suggestion, Withdrawal } from "@/lib/types";
 
 export type FormState = {
   error?: string;
@@ -174,6 +174,8 @@ export async function checkAccount(_: FormState, form: FormData): Promise<FormSt
 
 export type SuggestState = FormState & {
   rows?: { code: string; name: string; suggestions: Suggestion[] }[];
+  method?: "words" | "model";
+  note?: string;
 };
 
 // suggestMappings reads a pasted list ("code, name" per line) and asks for
@@ -189,12 +191,16 @@ export async function suggestMappings(_: SuggestState, form: FormData): Promise<
     });
   if (!items.length) return { error: "Paste at least one line: your code, then the item's name." };
   if (items.length > 200) return { error: "Up to 200 lines at a time." };
-  const res = await api<{ data: { code: string; name: string; suggestions: Suggestion[] }[] }>("/v1/items/suggest", {
+  const res = await api<{
+    data: { code: string; name: string; suggestions: Suggestion[] }[];
+    method: "words" | "model";
+    note?: string;
+  }>("/v1/items/suggest", {
     method: "POST",
     body: { items },
   });
   if (!res.ok) return { error: res.error.message };
-  return { rows: res.data.data };
+  return { rows: res.data.data, method: res.data.method, note: res.data.note };
 }
 
 export async function saveMappings(_: FormState, form: FormData): Promise<FormState> {
@@ -645,4 +651,106 @@ export async function deleteAIProvider(form: FormData) {
   await api(`/v1/operator/ai-providers/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
   revalidatePath("/console/operator/ai");
   redirect("/console/operator/ai");
+}
+
+export type ReadState = FormState & { extraction?: Extraction; key?: string; name?: string };
+
+const formTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
+
+// readClaimForm sends a scanned claim form to the API, which has a model read
+// it into a proposed claim. Nothing is saved until the person saves it.
+export async function readClaimForm(_: ReadState, form: FormData): Promise<ReadState> {
+  const file = form.get("form");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a PDF or a photo of the claim form." };
+  if (file.size > 10 << 20) return { error: "The file is over 10 MB. Scan it at a lower resolution." };
+  if (!formTypes.includes(file.type)) return { error: "Use a PDF, or a JPEG, PNG or WebP photo." };
+  const res = await api<Extraction>("/v1/claims/extract", {
+    method: "POST",
+    file: { data: await file.arrayBuffer(), type: file.type },
+  });
+  if (!res.ok) return { error: res.error.message };
+  return { extraction: res.data, key: crypto.randomUUID(), name: file.name };
+}
+
+// saveReadClaim saves the claim as the person checked it. Every value on it
+// is now theirs: the model's reading only filled the form.
+export async function saveReadClaim(prev: ReadState, form: FormData): Promise<ReadState> {
+  const ids = (name: string) => form.getAll(name).map(String);
+  const fields: Record<string, string> = {};
+  // Where each saved line and diagnosis came from on the form, to put the
+  // API's complaints back next to the right field.
+  const lineAt: string[] = [];
+  const dxAt: string[] = [];
+  const lines: ClaimInput["lines"] = [];
+  for (const i of ids("line")) {
+    if (form.get(`line_${i}_remove`) === "on") continue;
+    const price = text(form, `line_${i}_price`);
+    const unit = price ? cedis(price) : 0;
+    if (unit === null) fields[`lines.${i}.unit_price`] = "Enter the price in cedis, like 150 or 150.00.";
+    const qty = Number(text(form, `line_${i}_qty`) || 1);
+    if (!Number.isInteger(qty) || qty < 1) fields[`lines.${i}.quantity`] = "A whole number, 1 or more.";
+    const code = text(form, `line_${i}_code`);
+    lineAt.push(i);
+    lines.push({
+      description: text(form, `line_${i}_desc`),
+      quantity: qty,
+      unit_price: unit ?? 0,
+      ...(code ? { code: { system: "payahub", value: code } } : {}),
+      ...(text(form, `line_${i}_date`) ? { service_date: text(form, `line_${i}_date`) } : {}),
+    });
+  }
+  const diagnoses: ClaimInput["diagnoses"] = [];
+  for (const i of ids("dx")) {
+    if (form.get(`dx_${i}_remove`) === "on") continue;
+    const code = text(form, `dx_${i}_code`);
+    if (!code) fields[`diagnoses.${i}.code`] = "Enter the ICD-10 code, or leave this diagnosis out.";
+    dxAt.push(i);
+    diagnoses.push({
+      code: { system: "icd-10", value: code },
+      description: text(form, `dx_${i}_desc`) || undefined,
+      role: text(form, "dx_primary") === i ? "primary" : "secondary",
+    });
+  }
+  if (!text(form, "payer_id")) fields.payer_id = "Choose the insurer.";
+  if (Object.keys(fields).length) return { ...prev, error: "Check the highlighted fields.", fields };
+  const end = text(form, "end_date");
+  const claim: ClaimInput = {
+    payer_id: text(form, "payer_id"),
+    currency: "GHS",
+    member: {
+      member_number: text(form, "member_number"),
+      policy_number: text(form, "policy_number") || undefined,
+      first_name: text(form, "first_name") || undefined,
+      last_name: text(form, "last_name") || undefined,
+      birth_date: text(form, "birth_date") || undefined,
+      gender: text(form, "gender") || undefined,
+    },
+    provider: { name: text(form, "provider_name") },
+    encounter: { start_date: text(form, "start_date"), ...(end ? { end_date: end, type: "inpatient" } : {}) },
+    lines,
+    diagnoses,
+    authorization_code: text(form, "authorization_code") || undefined,
+  };
+  const res = await api<{ id: string }>("/v1/claims", {
+    method: "POST",
+    body: claim,
+    // Saving twice (a double click, a retry) makes one claim.
+    headers: prev.key ? { "Idempotency-Key": `read-${prev.key}` } : undefined,
+  });
+  if (!res.ok) {
+    const back: Record<string, string> = {};
+    const details = Array.isArray(res.error.details) ? (res.error.details as { field: string; message: string }[]) : [];
+    for (const d of details) {
+      // lines[2].unit_price -> lines.<form row>.unit_price
+      const path = d.field
+        .replace(/^lines\[(\d+)\]/, (_, n) => `lines.${lineAt[Number(n)]}`)
+        .replace(/^diagnoses\[(\d+)\]/, (_, n) => `diagnoses.${dxAt[Number(n)]}`)
+        .replace(/^payer_id$/, "payer_id");
+      back[path] = d.message;
+    }
+    const list = details.map((d) => `${d.field} ${d.message}`).join("; ");
+    return { ...prev, error: list ? `${res.error.message} ${list}.` : res.error.message, fields: back };
+  }
+  revalidatePath("/console/claims");
+  redirect(`/console/claims/${res.data.id}`);
 }

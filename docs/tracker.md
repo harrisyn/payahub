@@ -57,14 +57,20 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Model providers: Claude (Messages API, structured output, effort, server-side fallback), OpenAI
       and any OpenAI-compatible endpoint; each task tries its providers in order and fails over on
       outages or refusals; keys sealed in the vault, set and checked by operators in the console
-- [~] Code suggestion: word matching today; the model router is ready to plug in
-- [ ] Model-backed matching (clinic item → standard item, standard → payer code, diagnosis text → ICD-10)
-      with evidence, per-use thresholds, and the model and prompt version logged on every decision
+- [x] Model-backed matching of clinic items to standard items: the model can only pick a catalogue item of
+      the right kind; word matching fills in and takes over when no model answers; each pick carries its
+      reason, model, prompt version and hash
+- [x] Every model call recorded (task, model, prompt version and hash, input hash, tokens, time, outcome);
+      30-day use per task and model on the AI models page
+- [ ] Model-backed standard item → payer code, and diagnosis text → ICD-10 beyond the word search
 - [ ] Review queue in the console for low-confidence lines
 - [ ] Regression checks: a changed input must change the output; known pairs must keep their answer
 - [x] Intake: spreadsheet upload of claims (CSV or Excel, one row per line, checked before saving,
       re-uploads create nothing new, ready claims can be sent straight away; template in the console)
-- [ ] Intake: PDF and photo of a paper claim form, extracted then reviewed
+- [x] Intake: PDF and photo of a paper claim form, read by a model, every value checked (dates, amounts,
+      ICD-10, insurer, standard items from the catalogue), fields below 90% marked with the words they came
+      from; a person checks and saves (console: Claims, Read a claim form; API: POST /v1/claims/extract)
+- [ ] Try the reading on real Ghanaian claim forms with Claude and set the thresholds from the results
 
 ## 5. Checks before sending
 

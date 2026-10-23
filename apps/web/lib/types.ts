@@ -98,7 +98,7 @@ export type Item = {
   codes?: { system: string; value: string }[];
 };
 
-export type Suggestion = { item: Item; confidence: number };
+export type Suggestion = { item: Item; confidence: number; source?: "words" | "model"; reason?: string };
 
 export type ItemMapping = { local_code: string; local_name: string; item_id: string; confirmed_by: string; updated_at: string };
 
@@ -272,4 +272,59 @@ export type AIProvider = {
   check_ok?: boolean;
   check_message?: string;
   updated_at: string;
+};
+
+export type ReadField = {
+  confidence: number;
+  quote?: string;
+  read?: string;
+  note?: string;
+  needs_review: boolean;
+};
+
+export type ClaimInput = {
+  payer_id: string;
+  currency: string;
+  member: {
+    member_number: string;
+    policy_number?: string;
+    first_name?: string;
+    last_name?: string;
+    birth_date?: string;
+    gender?: string;
+  };
+  provider: { name: string };
+  encounter: { type?: string; start_date: string; end_date?: string };
+  lines: {
+    description: string;
+    code?: { system: string; value: string; display?: string };
+    quantity: number;
+    unit_price: number;
+    service_date?: string;
+  }[];
+  diagnoses: {
+    code: { system: string; value: string; display?: string };
+    role?: string;
+    description?: string;
+  }[];
+  authorization_code?: string;
+};
+
+export type Extraction = {
+  claim: ClaimInput;
+  fields: Record<string, ReadField>;
+  payer_name?: string;
+  review: number;
+  evidence: { model_version?: string; prompt_version?: string; confidence?: number };
+};
+
+export type AIUsage = {
+  task: string;
+  provider: string;
+  model: string;
+  runs: number;
+  failed: number;
+  input_tokens: number;
+  output_tokens: number;
+  avg_ms: number;
 };
