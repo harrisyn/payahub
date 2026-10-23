@@ -1,0 +1,110 @@
+/* The form kit on the console's terms: Ink text, 1px #E6E1EF edges, 8px
+   corners, an Indigo focus ring. Mantine's variables are set here rather than
+   per component so every field shares one look. */
+:root {
+  --mantine-color-body: #ffffff;
+  --mantine-color-text: #1F0F3A;
+  --mantine-color-dimmed: #5B5370;
+  --mantine-color-placeholder: #8A82A0;
+  --mantine-color-default-border: #D9D2E6;
+  --mantine-color-error: #a3141b;
+  --mantine-font-size-sm: 14px;
+  --mantine-line-height: 1.45;
+  --ph-edge: #D9D2E6;
+  --ph-addon: #F6F4FB;
+}
+
+.mantine-Input-input,
+.mantine-InputWrapper-root .mantine-Input-input {
+  border-color: var(--ph-edge);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.mantine-Input-input:hover:not(:focus, :focus-within, [data-error]) { border-color: #BFB6D3; }
+.mantine-Input-input:focus,
+.mantine-Input-input:focus-within {
+  border-color: var(--mantine-color-indigo-6);
+  box-shadow: 0 0 0 3px rgb(90 92 240 / 0.16);
+  outline: none;
+}
+.mantine-InputWrapper-label { font-weight: 600; font-size: 13px; margin-bottom: 4px; color: var(--mantine-color-text); }
+.mantine-InputWrapper-description { font-size: 12.5px; margin-bottom: 6px; }
+.mantine-InputWrapper-error { font-size: 12.5px; margin-top: 4px; }
+.mantine-InputWrapper-required { color: var(--mantine-color-error); }
+
+/* Option rows: label, then an optional hint in muted small type. */
+.ph-option { display: grid; gap: 1px; min-width: 0; }
+.ph-option__hint { font-size: 12px; color: var(--mantine-color-dimmed); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mantine-Combobox-dropdown { border-color: #E6E1EF; padding: 4px; }
+.mantine-Combobox-option[data-combobox-selected] { background: var(--mantine-color-indigo-0); color: inherit; }
+.mantine-Combobox-option[data-checked] { font-weight: 600; }
+.mantine-Combobox-empty { font-size: 13px; padding: 10px 8px; }
+.mantine-Pill-root { background: var(--mantine-color-indigo-0); color: #2E1D4F; font-weight: 500; }
+
+/* Attached prepend/append boxes: one outline around the whole group. */
+.ph-group {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--ph-edge);
+  border-radius: var(--mantine-radius-md);
+  background: #fff;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  min-width: 0;
+}
+.ph-group:hover:not(:focus-within, [data-error]) { border-color: #BFB6D3; }
+.ph-group:focus-within { border-color: var(--mantine-color-indigo-6); box-shadow: 0 0 0 3px rgb(90 92 240 / 0.16); }
+.ph-group[data-error] { border-color: var(--mantine-color-error); }
+.ph-group__field { flex: 1; min-width: 0; }
+.ph-group .ph-group__field .mantine-Input-input,
+.ph-group .ph-group__field .mantine-Input-input:focus { border: 0; box-shadow: none; background: transparent; }
+.ph-addon {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--ph-addon);
+  color: var(--mantine-color-dimmed);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ph-addon:first-child { border-right: 1px solid #ECE7F4; border-radius: calc(var(--mantine-radius-md) - 1px) 0 0 calc(var(--mantine-radius-md) - 1px); }
+.ph-addon:last-child { border-left: 1px solid #ECE7F4; border-radius: 0 calc(var(--mantine-radius-md) - 1px) calc(var(--mantine-radius-md) - 1px) 0; }
+
+/* Rich text */
+.ph-rich { border-color: var(--ph-edge); border-radius: var(--mantine-radius-md); }
+.ph-rich:focus-within { border-color: var(--mantine-color-indigo-6); box-shadow: 0 0 0 3px rgb(90 92 240 / 0.16); }
+.ph-rich[data-error] { border-color: var(--mantine-color-error); }
+.ph-rich .mantine-RichTextEditor-toolbar { border-bottom-color: #ECE7F4; background: #FBFAFD; border-radius: var(--mantine-radius-md) var(--mantine-radius-md) 0 0; }
+.ph-rich .mantine-RichTextEditor-content { border-radius: 0 0 var(--mantine-radius-md) var(--mantine-radius-md); }
+.ph-rich .ProseMirror { min-height: var(--ph-rich-min, 140px); font-size: 14px; }
+.ph-rich .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--mantine-color-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Calendar */
+.mantine-DatePickerInput-day[data-selected],
+.mantine-DateInput-day[data-selected],
+.mantine-Day-day[data-selected] { background: var(--mantine-color-indigo-6); }
+
+/* /ui: the kit's own page */
+.ph-gallery { min-height: 100svh; background: #F3F0FA; color: #1F0F3A; font-size: 14px; padding: 32px clamp(16px, 4vw, 48px) 64px; }
+.ph-gallery__head { max-width: 1100px; margin: 0 auto 24px; display: grid; gap: 20px; }
+.ph-gallery__brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; text-decoration: none; font-size: 15px; }
+.ph-gallery__head h1 { font-size: 32px; line-height: 1.1; letter-spacing: -0.02em; }
+.ph-gallery__head p { margin-top: 8px; color: #5B5370; max-width: 70ch; }
+.ph-gallery__head code { font-family: var(--font-mono), monospace; font-size: 13px; background: #E6E0F4; padding: 1px 5px; border-radius: 4px; }
+.ph-gallery__form { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+.ph-gallery__card { background: #fff; border: 1px solid #E6E1EF; border-radius: 16px; padding: 24px; display: grid; gap: 18px; }
+.ph-gallery__card-head h2 { font-size: 16px; line-height: 22px; }
+.ph-gallery__card-head p { color: #5B5370; font-size: 13px; margin-top: 2px; }
+.ph-gallery__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 18px 20px; align-items: start; }
+.ph-gallery__wide { grid-column: 1 / -1; }
+.ph-gallery__foot { display: flex; justify-content: flex-end; }
+.ph-gallery__sent { background: #140A26; color: #E6E0F4; border-radius: 12px; padding: 16px 18px; font-family: var(--font-mono), monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-x: auto; }
+.ph-button { display: inline-flex; align-items: center; height: 38px; padding: 0 16px; border-radius: 8px; background: #1F0F3A; color: #fff; font-weight: 600; font-size: 14px; }
+.ph-button:hover { background: #2E1D4F; }
+/* Clinics work weekends: weekend days are not shown as warnings. */
+.mantine-Popover-dropdown button[data-weekend]:not([data-outside], [data-selected], [data-in-range]) { color: inherit; }

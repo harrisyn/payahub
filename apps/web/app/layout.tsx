@@ -22,8 +22,8 @@ export const metadata: Metadata = {
   applicationName: site.name,
   openGraph: { siteName: site.name, type: "website", locale: "en_GH", title: site.name, description: site.description },
   twitter: { card: "summary_large_image", title: site.name, description: site.description },
-  // Indexing stays off until the product name is final; flip in robots.ts too.
-  robots: { index: false, follow: false },
+  // Off until launch: see site.indexable.
+  robots: { index: site.indexable, follow: site.indexable },
 };
 
 export const viewport: Viewport = { themeColor: "#1F0F3A" };
