@@ -16,7 +16,6 @@ import (
 
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
-	"github.com/harrisyn/payahub/internal/engine"
 	"github.com/harrisyn/payahub/internal/icd10"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
@@ -41,6 +40,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/claims/{id}", s.auth(s.getClaim))
 	mux.Handle("GET /v1/claims/{id}/events", s.auth(s.claimEvents))
 	mux.Handle("POST /v1/claims/{id}/submit", s.auth(s.submitClaim))
+	mux.Handle("GET /v1/claims/{id}/checks", s.auth(s.claimChecks))
+	mux.Handle("POST /v1/claims/{id}/review", s.auth(s.reviewClaim))
 	s.catalogRoutes(mux)
 	s.consoleRoutes(mux)
 	s.operatorRoutes(mux)
@@ -199,17 +200,12 @@ func (s *Server) validateClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	org := orgFrom(r.Context())
 	c := newClaim(org, in, sha)
-	m, err := queue.Prepare(r.Context(), s.Store.Pool, c)
+	v, err := queue.Check(r.Context(), s.Store.Pool, c)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	overrides, err := store.PayerOverrides(r.Context(), s.Store.Pool, org.ID, c.PayerID, org.Environment)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, engine.Validate(c, m, overrides))
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) getClaim(w http.ResponseWriter, r *http.Request) {
@@ -258,6 +254,63 @@ func (s *Server) submitClaim(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]any{"claim": c, "issues": v.Issues})
+	}
+}
+
+// claimChecks runs the edit rules on a saved claim, as submitting would,
+// without changing it: what stands between the claim and the payer.
+func (s *Server) claimChecks(w http.ResponseWriter, r *http.Request) {
+	c, err := s.Store.GetClaim(r.Context(), orgFrom(r.Context()).ID, r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "claim_not_found", "No claim "+r.PathValue("id")+".", nil)
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	v, err := queue.Check(r.Context(), s.Store.Pool, c)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// reviewClaim records that a person confirmed issues awaiting review (an AI
+// value below its threshold, a possible duplicate). Errors cannot be
+// confirmed away; they are fixed on the claim.
+func (s *Server) reviewClaim(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Confirm []queue.Confirm `json:"confirm"`
+		Note    string          `json:"note"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Confirm) == 0 || len(in.Confirm) > 100 || len(in.Note) > 500 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_review", "Confirm between 1 and 100 issues, with a note of up to 500 characters.", nil)
+		return
+	}
+	org := orgFrom(r.Context())
+	by := "API key"
+	if org.Session {
+		if email, err := s.Store.UserEmail(r.Context(), org.ID, org.UserID); err == nil && email != "" {
+			by = email
+		}
+	}
+	c, v, err := queue.Review(r.Context(), s.Store, org.ID, r.PathValue("id"), by, in.Note, in.Confirm)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "claim_not_found", "No claim "+r.PathValue("id")+".", nil)
+	case errors.Is(err, queue.ErrClaimMoving):
+		writeError(w, http.StatusConflict, "claim_moving", "The claim is already being sent; there is nothing to review.", nil)
+	case errors.Is(err, queue.ErrNotReviewable):
+		writeError(w, http.StatusUnprocessableEntity, "not_reviewable", "Only issues awaiting review can be confirmed. These are the claim's issues now.", v.Issues)
+	case err != nil:
+		s.internal(w, r, err)
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"claim": c, "validation": v})
 	}
 }
 

@@ -62,6 +62,11 @@ type SubmissionConfig struct {
 	LineSubmissionMode         string `json:"line_submission_mode"`      // realtime | bulk
 	ClaimCreationTiming        string `json:"claim_creation_timing"`     // early | deferred
 	SameDayEncounterConversion bool   `json:"same_day_encounter_conversion"`
+	// FilingDays is how long after the visit (its discharge, for an
+	// admission) the payer accepts a claim; 0 means 60, the NHIS limit under
+	// LI 1809. LateFilingPolicy is warn (send, flagged) or block.
+	FilingDays       int    `json:"filing_days,omitempty"`
+	LateFilingPolicy string `json:"late_filing_policy,omitempty"`
 }
 
 func DefaultSubmissionConfig() SubmissionConfig {

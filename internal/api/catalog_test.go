@@ -111,7 +111,11 @@ func TestItemMappingsResolveClaimLines(t *testing.T) {
 	}
 	s, out = e.do(t, "POST", "/v1/claims/"+c["id"].(string)+"/submit", nil)
 	issues := out["error"].(map[string]any)["details"].([]any)
-	if s != 422 || !strings.Contains(issues[0].(map[string]any)["message"].(string), `map your code "XRAY9"`) {
+	said := false
+	for _, i := range issues {
+		said = said || strings.Contains(i.(map[string]any)["message"].(string), `map your code "XRAY9"`)
+	}
+	if s != 422 || !said {
 		t.Fatalf("unmapped code: %d %v", s, out)
 	}
 	// Mapping it afterwards lets the same claim through.

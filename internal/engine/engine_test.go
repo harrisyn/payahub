@@ -72,27 +72,27 @@ func nextID() int { counter++; return counter }
 
 func TestValidateStates(t *testing.T) {
 	m, _, _ := connector.Lookup(sandbox.Key)
-	if v := Validate(goodClaim(), m, nil); v.State != claim.Ready || len(v.Issues) != 0 {
+	if v := Validate(goodClaim(), m, nil, Facts{}); v.State != claim.Ready || len(v.Issues) != 0 {
 		t.Fatalf("clean claim: %+v", v)
 	}
 
 	c := goodClaim()
 	c.Lines[0].Mapping = nil
-	if v := Validate(c, m, nil); v.State != claim.Draft || v.Issues[0].Code != "line_unmapped" {
+	if v := Validate(c, m, nil, Facts{}); v.State != claim.Draft || v.Issues[0].Code != "line_unmapped" {
 		t.Errorf("unmapped line should block: %+v", v)
 	}
-	if v := Validate(c, m, []byte(`{"unmapped_line_policy":"send_raw"}`)); v.State != claim.Ready {
+	if v := Validate(c, m, []byte(`{"unmapped_line_policy":"send_raw"}`), Facts{}); v.State != claim.Ready {
 		t.Errorf("send_raw override should allow it: %+v", v)
 	}
 
 	low := 0.7
 	c = goodClaim()
 	c.Lines[0].Mapping.Evidence = &claim.Evidence{Origin: claim.OriginAIMapped, Confidence: &low}
-	if v := Validate(c, m, nil); v.State != claim.NeedsReview {
+	if v := Validate(c, m, nil, Facts{}); v.State != claim.NeedsReview {
 		t.Errorf("low-confidence AI mapping should need review: %+v", v)
 	}
 	c.Lines[0].Mapping.Evidence.ConfirmedBy = "usr_1"
-	if v := Validate(c, m, nil); v.State != claim.Ready {
+	if v := Validate(c, m, nil, Facts{}); v.State != claim.Ready {
 		t.Errorf("a confirmed mapping should pass: %+v", v)
 	}
 }
@@ -260,6 +260,6 @@ func BenchmarkValidate(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		Validate(c, m, nil)
+		Validate(c, m, nil, Facts{})
 	}
 }

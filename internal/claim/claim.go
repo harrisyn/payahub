@@ -201,6 +201,8 @@ type Claim struct {
 	Provenance       Provenance `json:"provenance"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	// Reviews are the issues a person confirmed; set only through the review step.
+	Reviews []Review `json:"reviews,omitempty"`
 	Input
 }
 

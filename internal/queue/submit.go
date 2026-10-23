@@ -100,11 +100,10 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 			return c, engine.Validation{}, err
 		}
 	}
-	overrides, err := store.PayerOverrides(ctx, tx, c.OrganizationID, c.PayerID, c.Environment)
+	v, err := validate(ctx, tx, c, m)
 	if err != nil {
 		return nil, engine.Validation{}, err
 	}
-	v := engine.Validate(c, m, overrides)
 
 	from := c.State
 	if v.State != claim.Ready {
@@ -138,6 +137,29 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 // the connector that reaches the payer. Sandbox claims are sent to the
 // sandbox payer but checked against the named payer's rules, so trials see
 // realistic validation.
+// Check resolves the claim's lines and runs the edit rules with what the
+// database knows (the payer's settings for the organisation, other claims
+// that may be the same one). It changes nothing.
+func Check(ctx context.Context, q store.Querier, c *claim.Claim) (engine.Validation, error) {
+	m, err := Prepare(ctx, q, c)
+	if err != nil {
+		return engine.Validation{}, err
+	}
+	return validate(ctx, q, c, m)
+}
+
+func validate(ctx context.Context, q store.Querier, c *claim.Claim, m connector.Manifest) (engine.Validation, error) {
+	overrides, err := store.PayerOverrides(ctx, q, c.OrganizationID, c.PayerID, c.Environment)
+	if err != nil {
+		return engine.Validation{}, err
+	}
+	dups, err := store.FindDuplicates(ctx, q, c)
+	if err != nil {
+		return engine.Validation{}, err
+	}
+	return engine.Validate(c, m, overrides, engine.Facts{Today: time.Now(), Duplicates: dups}), nil
+}
+
 func Prepare(ctx context.Context, q store.Querier, c *claim.Claim) (connector.Manifest, error) {
 	m, ok := manifestFor(c)
 	if !ok {
