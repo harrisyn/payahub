@@ -10,8 +10,9 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 
 - [x] One shared payer catalogue, each payer standalone or behind a platform (ADR in PR #2)
 - [x] A clinic picks a payer and adds its platform account once; credentials sealed, write-only
-- [ ] The real payer list: every payer Serenity reaches today, its platform and its insurer code
-      (blocked: needs read access to Serenity's database)
+- [x] Payer import: operators load an export of Serenity's payers (CSV or Excel), check what each row
+      will do, then import; existing settings are never overwritten (export query in docs/serenity-payers.md)
+- [ ] Run the export on Serenity's database and import the real payer list (needs someone with DB access)
 - [x] Operator console: add and edit payers, their platform fields and code lists without a deploy
       (catalogue in the database, seeded once from the JSON files; every process refreshes within 5s;
       change history per payer; `payahub operator EMAIL` grants the role)
@@ -53,12 +54,16 @@ each with contract tests against a recorded copy of the platform's API.
 ## 4. AI translation and matching
 
 - [x] Rule: no model output reaches a payer; AI-set fields carry evidence; below threshold goes to review
-- [~] Code suggestion: word matching today, no model
+- [x] Model providers: Claude (Messages API, structured output, effort, server-side fallback), OpenAI
+      and any OpenAI-compatible endpoint; each task tries its providers in order and fails over on
+      outages or refusals; keys sealed in the vault, set and checked by operators in the console
+- [~] Code suggestion: word matching today; the model router is ready to plug in
 - [ ] Model-backed matching (clinic item → standard item, standard → payer code, diagnosis text → ICD-10)
       with evidence, per-use thresholds, and the model and prompt version logged on every decision
 - [ ] Review queue in the console for low-confidence lines
 - [ ] Regression checks: a changed input must change the output; known pairs must keep their answer
-- [ ] Intake: spreadsheet upload of claims
+- [x] Intake: spreadsheet upload of claims (CSV or Excel, one row per line, checked before saving,
+      re-uploads create nothing new, ready claims can be sent straight away; template in the console)
 - [ ] Intake: PDF and photo of a paper claim form, extracted then reviewed
 
 ## 5. Checks before sending
@@ -85,12 +90,17 @@ each with contract tests against a recorded copy of the platform's API.
 - [ ] Notify operators of a new enquiry by email once outbound email is set up
 - [ ] Team members and roles
 - [ ] Webhooks to the clinic's system on every state change
-- [ ] Billing and usage (Paystack)
+- [x] Wallets: double-entry ledger; organisation and platform wallets; per-claim charges on acknowledgement and
+      monthly fees from the wallet; live claims pause when the wallet does not cover one more
+- [x] Payment providers behind one interface: Paystack (card, mobile money, bank payouts) and a sandbox;
+      fundings credited only from the provider's verification; withdrawals approved by an operator, then paid
+- [ ] Paystack live keys and webhook URL set in production; first real funding checked end to end
+- [ ] A second payment provider (e.g. Hubtel or Flutterwave) once a customer needs it
 - [ ] Throughput test at scale on the full path
 
 ## Waiting on the owner
 
 - Read access to Serenity's database, for the real payer list and mappings
 - Test accounts on XCeli, Medserve, SmartClaims, RX Insurance and ClaimIQ
-- An AI provider key, and agreement on which provider sees claim data
+- An AI provider key (entered in the console under AI models), and agreement on which provider sees claim data
 - Final name, prices and contact email

@@ -9,7 +9,10 @@
 // Configuration is by environment: DATABASE_URL, PAYAHUB_ADDR (default :8080),
 // PAYAHUB_WORKERS (concurrent submissions per worker process, default 100),
 // PAYAHUB_VAULT_KEY (base64 32-byte key that seals payer credentials; required
-// for api and worker, generated per run by dev).
+// for api and worker, generated per run by dev), PAYAHUB_PAYSTACK_SECRET_KEY
+// (offers Paystack for wallet funding and withdrawals) and
+// PAYAHUB_PAYMENTS_SANDBOX=1 (offers the sandbox payment provider; always on
+// in dev).
 package main
 
 import (
@@ -26,6 +29,7 @@ import (
 
 	"github.com/harrisyn/payahub/internal/api"
 	_ "github.com/harrisyn/payahub/internal/connector/all"
+	"github.com/harrisyn/payahub/internal/payment"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
@@ -89,6 +93,12 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	// and picks up operators' changes within a few seconds.
 	if err := st.RefreshCatalog(ctx); err != nil && cmd != "dev" {
 		return fmt.Errorf("loading the catalogue (run payahub migrate first): %w", err)
+	}
+	if k := os.Getenv("PAYAHUB_PAYSTACK_SECRET_KEY"); k != "" {
+		payment.Register(payment.NewPaystack(k))
+	}
+	if cmd == "dev" || os.Getenv("PAYAHUB_PAYMENTS_SANDBOX") == "1" {
+		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
 	}
 	go st.WatchCatalog(ctx, 5*time.Second, func(err error) { logger.Warn("catalogue refresh failed", "err", err) })
 	switch cmd {

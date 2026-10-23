@@ -50,9 +50,17 @@ type Client = river.Client[pgx.Tx]
 func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) (*Client, error) {
 	ws := river.NewWorkers()
 	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
+	river.AddWorker(ws, &PayoutWorker{Store: st})
+	river.AddWorker(ws, &BillingWorker{Store: st, Logger: logger})
 	cfg := &river.Config{Workers: ws, Logger: logger}
 	if workers > 0 {
-		cfg.Queues = map[string]river.QueueConfig{SubmissionsQueue: {MaxWorkers: workers}}
+		cfg.Queues = map[string]river.QueueConfig{
+			SubmissionsQueue: {MaxWorkers: workers},
+			MoneyQueue:       {MaxWorkers: 10},
+		}
+		cfg.PeriodicJobs = []*river.PeriodicJob{river.NewPeriodicJob(river.PeriodicInterval(billingEvery),
+			func() (river.JobArgs, *river.InsertOpts) { return BillingArgs{}, nil },
+			&river.PeriodicJobOpts{ID: "billing", RunOnStart: true})}
 	}
 	return river.NewClient(riverpgxv5.New(st.Pool), cfg)
 }
@@ -62,7 +70,9 @@ var (
 	ErrNotSubmittable = errors.New("claim is not ready to submit")
 	ErrUnknownPayer   = errors.New("unknown payer")
 	// ErrTrialLimit is returned for a live claim once the trial has ended or used its live claims.
-	ErrTrialLimit = errors.New("the trial has no live claims left")
+	ErrTrialLimit = store.ErrTrialLimit
+	// ErrWalletEmpty is returned for a live claim on a wallet plan the wallet no longer covers.
+	ErrWalletEmpty = store.ErrWalletEmpty
 )
 
 // Enqueue validates a claim, moves it to ready and inserts its submit job, all
@@ -86,12 +96,8 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 		return nil, engine.Validation{}, err
 	}
 	if c.Environment == "live" {
-		allowed, err := store.TrialAllowsLive(ctx, tx, c.OrganizationID)
-		if err != nil {
-			return nil, engine.Validation{}, err
-		}
-		if !allowed {
-			return c, engine.Validation{}, ErrTrialLimit
+		if err := store.MayGoLive(ctx, tx, c.OrganizationID); err != nil {
+			return c, engine.Validation{}, err
 		}
 	}
 	overrides, err := store.PayerOverrides(ctx, tx, c.OrganizationID, c.PayerID, c.Environment)

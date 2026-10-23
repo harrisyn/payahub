@@ -222,11 +222,12 @@ func (s *Server) putPlan(w http.ResponseWriter, r *http.Request) {
 		// Enterprise terms are agreed and invoiced offline; until then this is a request.
 		plan = onboarding.PlanEnterpriseRequested
 	}
-	if err := s.Store.SetPlan(r.Context(), orgFrom(r.Context()).ID, plan); err != nil {
+	charged, err := s.Store.SetPlan(r.Context(), orgFrom(r.Context()).ID, plan)
+	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plan": plan})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": plan, "charged": charged})
 }
 
 func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) {

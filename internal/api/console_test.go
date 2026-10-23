@@ -214,6 +214,7 @@ func TestTrialLimitsLiveClaims(t *testing.T) {
 		t.Fatalf("expired trial sent a live claim: %d %v", s, out)
 	}
 	ses.do(t, "PUT", "/v1/organization/plan", map[string]any{"plan": "volume"})
+	fund(t, ses, 1000)
 	if s, _ := live.do(t, "POST", "/v1/claims/"+id+"/submit", nil); s != 202 {
 		t.Fatalf("paid plan blocked: %d", s)
 	}

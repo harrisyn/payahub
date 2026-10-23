@@ -176,3 +176,100 @@ export type Price = {
 };
 
 export type Diagnosis = { code: string; title: string; billable: boolean };
+
+export type PlanPrice = { monthly_fee: number; per_claim: number; included: number };
+export type Wallet = {
+  currency: string;
+  balance: number;
+  reserved: number;
+  available: number;
+  pending_withdrawals: number;
+  plan: string;
+  price?: PlanPrice;
+  charged_this_month: number;
+  can_send_live: boolean;
+};
+export type WalletEntry = {
+  seq: number;
+  transaction_id: string;
+  kind: "funding" | "charge" | "fee" | "withdrawal" | "withdrawal_returned" | "adjustment";
+  memo: string;
+  amount: number;
+  balance_after: number;
+  reference?: string;
+  created_at: string;
+};
+export type PaymentStatus = "pending" | "succeeded" | "failed" | "abandoned";
+export type Funding = {
+  id: string;
+  provider: string;
+  amount: number;
+  currency: string;
+  status: PaymentStatus;
+  paid_amount?: number;
+  fee?: number;
+  checkout_url?: string;
+  message?: string;
+  created_at: string;
+};
+export type PaymentProvider = {
+  id: string;
+  name: string;
+  currencies: string[];
+  channels: string[];
+  payouts: boolean;
+  sandbox: boolean;
+};
+export type Bank = { code: string; name: string; type: "bank" | "mobile_money" };
+export type PayoutAccount = {
+  id: string;
+  provider: string;
+  type: "bank" | "mobile_money";
+  name: string;
+  bank_code: string;
+  bank_name: string;
+  account_number: string;
+  currency: string;
+};
+export type WithdrawalStatus = "requested" | "approved" | "paying" | "paid" | "failed" | "rejected";
+export type Withdrawal = {
+  id: string;
+  organization_id: string;
+  organization_name?: string;
+  payout_account_id: string;
+  destination: string;
+  provider: string;
+  amount: number;
+  currency: string;
+  status: WithdrawalStatus;
+  reason: string;
+  message?: string;
+  created_at: string;
+  completed_at?: string;
+};
+export type LedgerView = {
+  accounts: { id: string; kind: string; currency: string; balance: number }[];
+  wallets: Record<string, number>;
+  balanced: boolean;
+};
+
+export type AIKind = "anthropic" | "openai" | "openai_compatible";
+
+export type AIProvider = {
+  id: string;
+  kind: AIKind;
+  name: string;
+  base_url: string;
+  model: string;
+  effort: string;
+  json_mode: string;
+  tasks: string[];
+  priority: number;
+  enabled: boolean;
+  has_key: boolean;
+  key_hint: string;
+  checked_at?: string;
+  check_ok?: boolean;
+  check_message?: string;
+  updated_at: string;
+};

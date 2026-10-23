@@ -271,6 +271,10 @@ paths:
     put:
       security: [{ session: [] }]
       summary: Choose a plan. Enterprise is recorded as a request and agreed offline.
+      description: |
+        A plan with a monthly fee charges this month's fee from the wallet at once, less any fee already
+        charged this month; `charged` says how much. The fee may take the wallet below zero, which pauses
+        live claims until it is funded.
       requestBody:
         required: true
         content:
@@ -285,7 +289,7 @@ paths:
           description: Saved
           content:
             application/json:
-              schema: { type: object, properties: { plan: { $ref: "#/components/schemas/Plan" } } }
+              schema: { type: object, properties: { plan: { $ref: "#/components/schemas/Plan" }, charged: { type: integer } } }
         "422": { $ref: "#/components/responses/Error" }
   /v1/api-keys:
     get:
@@ -435,6 +439,59 @@ paths:
         "200": { description: Replay of an earlier request with the same Idempotency-Key }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/import:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Import claims from a CSV or Excel file of claim lines
+      description: |
+        One row per claim line; rows with the same claim reference make one claim. The header row needs
+        a claim reference, payer (id or name), member number and visit date, and an item code or a
+        description on each line; patient name, visit type, provider, diagnosis (`;`-separated, primary
+        first), authorisation, quantity, unit price and currency are read when present. A line with no
+        price takes it from the price list. Each claim is validated exactly as `POST /v1/claims`.
+        With `dry_run` nothing is saved. Otherwise each readable claim is saved under an idempotency key
+        derived from the file and the claim's rows, so uploading the same file again creates nothing
+        new; with `submit`, claims that pass their checks are also queued for sending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: byte, description: The .csv or .xlsx file, base64 }
+                dry_run: { type: boolean }
+                submit: { type: boolean }
+      responses:
+        "200":
+          description: Every claim in the file, with what happened to it
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  ready: { type: integer, description: Claims that pass every check }
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        reference: { type: string }
+                        rows: { type: array, items: { type: integer } }
+                        payer_id: { type: string }
+                        member_number: { type: string }
+                        lines: { type: integer }
+                        total: { type: integer, description: Minor units }
+                        currency: { type: string }
+                        errors: { type: array, items: { type: object, properties: { field: { type: string }, message: { type: string } } } }
+                        issues: { $ref: "#/components/schemas/Validation/properties/issues" }
+                        state: { type: string }
+                        claim_id: { type: string }
+                        replayed: { type: boolean }
+                        queued: { type: boolean }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/claims/validate:
     post:
       summary: Dry run of the edit rules and submission plan; nothing is stored or sent
@@ -579,6 +636,277 @@ paths:
       responses:
         "204": { description: Removed }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/payment-providers:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Payment providers configured for funding wallets and paying withdrawals
+      responses:
+        "200": { description: Providers, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PaymentProvider" } } } } } } }
+  /v1/payment-providers/{id}/banks:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Banks and mobile networks a provider pays out to
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: currency, in: query, schema: { type: string, default: GHS } }
+      responses:
+        "200": { description: Banks, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { type: object, properties: { code: { type: string }, name: { type: string }, type: { enum: [bank, mobile_money] } } } } } } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/wallet:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: The organisation's wallet
+      description: |
+        `available` is the balance less what live claims in flight will cost once acknowledged. On a
+        wallet plan a live claim is refused (402 `wallet_empty`) when `available` does not cover one more.
+      responses:
+        "200": { description: Wallet, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/wallet/transactions:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: The wallet's statement, newest first
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: before, in: query, description: next_before from the previous page, schema: { type: string } }
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  next_before: { type: string }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        seq: { type: integer }
+                        transaction_id: { type: string }
+                        kind: { enum: [funding, charge, fee, withdrawal, withdrawal_returned, adjustment] }
+                        memo: { type: string }
+                        amount: { type: integer, description: Minor units; positive adds to the wallet }
+                        balance_after: { type: integer }
+                        reference: { type: string, description: The claim, funding or withdrawal it is for }
+                        created_at: { type: string, format: date-time }
+  /v1/wallet/fundings:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Start a checkout that funds the wallet
+      description: |
+        Returns a `checkout_url` at the provider. The wallet is credited only when the provider confirms
+        the payment (on `GET /v1/wallet/fundings/{id}`, the provider's webhook, or the periodic check),
+        exactly once. Honours `Idempotency-Key`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, provider]
+              properties:
+                amount: { type: integer, minimum: 100, maximum: 10000000, description: Minor units of GHS }
+                provider: { type: string }
+                callback_url: { type: string, format: uri, description: Where the provider sends the browser afterwards }
+      responses:
+        "201": { description: Checkout started, content: { application/json: { schema: { $ref: "#/components/schemas/Funding" } } } }
+        "200": { description: A repeat of an earlier request with the same Idempotency-Key, content: { application/json: { schema: { $ref: "#/components/schemas/Funding" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Recent fundings
+      responses:
+        "200": { description: Fundings, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Funding" } } } } } } }
+  /v1/wallet/fundings/{id}:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: A funding, confirmed with the provider first while it is pending
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Funding, content: { application/json: { schema: { $ref: "#/components/schemas/Funding" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/wallet/payout-accounts:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Where withdrawals go
+      responses:
+        "200": { description: Accounts, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PayoutAccount" } } } } } } }
+    post:
+      security: [{ session: [] }]
+      summary: Add a bank or mobile money account for withdrawals (console session only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, type, name, bank_code, account_number]
+              properties:
+                provider: { type: string }
+                type: { enum: [bank, mobile_money] }
+                name: { type: string }
+                bank_code: { type: string }
+                account_number: { type: string }
+      responses:
+        "201": { description: Added, content: { application/json: { schema: { $ref: "#/components/schemas/PayoutAccount" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/wallet/payout-accounts/{id}:
+    delete:
+      security: [{ session: [] }]
+      summary: Remove a payout account
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/wallet/withdrawals:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Recent withdrawals
+      responses:
+        "200": { description: Withdrawals, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Withdrawal" } } } } } } }
+    post:
+      security: [{ session: [] }]
+      summary: Ask to withdraw from the wallet (console session only)
+      description: |
+        The amount is held in the wallet at once and paid after a Payahub operator approves it; a
+        rejected or failed payout returns it. Money held for live claims in flight cannot be withdrawn.
+        Honours `Idempotency-Key`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, payout_account_id]
+              properties:
+                amount: { type: integer, minimum: 100 }
+                payout_account_id: { type: string }
+                reason: { type: string }
+      responses:
+        "201": { description: Requested, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "200": { description: A repeat with the same Idempotency-Key, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/webhooks/payments/{provider}:
+    post:
+      summary: A payment provider's webhook
+      description: |
+        Signature-checked per provider (Paystack: `x-paystack-signature`, HMAC-SHA512 of the body).
+        A notice only prompts a check with the provider; money moves on the provider's own record.
+      parameters: [{ name: provider, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Taken }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/operator/withdrawals:
+    get:
+      security: [{ session: [] }]
+      summary: Withdrawals across organisations (operators only)
+      parameters: [{ name: status, in: query, description: Comma-separated statuses, schema: { type: string } }]
+      responses:
+        "200": { description: Withdrawals, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Withdrawal" } } } } } } }
+  /v1/operator/withdrawals/{id}/approve:
+    post:
+      security: [{ session: [] }]
+      summary: Approve a requested withdrawal; its payout is queued in the same transaction
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Approved, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/operator/withdrawals/{id}/reject:
+    post:
+      security: [{ session: [] }]
+      summary: Reject a requested withdrawal and return its amount to the wallet
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } } }
+      responses:
+        "200": { description: Rejected, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/operator/wallets/{org}/adjustments:
+    post:
+      security: [{ session: [] }]
+      summary: Credit (positive) or debit an organisation's wallet with a reason (operators only)
+      parameters:
+        - { name: org, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount, memo], properties: { amount: { type: integer }, memo: { type: string } } } } } }
+      responses:
+        "201": { description: Posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+        "200": { description: A repeat; nothing posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/operator/ai-providers:
+    get:
+      security: [{ session: [] }]
+      summary: Model providers, the tasks they serve and the default Claude model (operators only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIProvider" } }
+                  tasks: { type: array, items: { type: string, enum: [document_intake, code_matching] } }
+                  default_models: { type: object, additionalProperties: { type: string } }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/operator/ai-providers/{id}:
+    put:
+      security: [{ session: [] }]
+      summary: Create or change a model provider (operators only)
+      description: |
+        The key is write-only: it is sealed on save and never returned. Leave api_key empty to keep
+        the saved one. A change clears the last check. Each task tries its enabled providers by
+        ascending priority and moves to the next on an outage or a refusal.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9_-]{1,39}$" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, name, model]
+              properties:
+                kind: { type: string, enum: [anthropic, openai, openai_compatible] }
+                name: { type: string }
+                base_url: { type: string, description: "Required for openai_compatible; https, or http on localhost" }
+                model: { type: string, example: claude-opus-5-5 }
+                effort: { type: string, enum: [low, medium, high, xhigh, max], description: Claude only; default high }
+                json_mode: { type: string, enum: [schema, object, none], description: OpenAI and compatible only; default schema }
+                tasks: { type: array, items: { type: string, enum: [document_intake, code_matching] } }
+                priority: { type: integer, minimum: 0, maximum: 1000 }
+                enabled: { type: boolean, default: true }
+                api_key: { type: string, writeOnly: true, description: Required for anthropic and openai on create }
+      responses:
+        "200": { description: Changed, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      security: [{ session: [] }]
+      summary: Remove a model provider and its sealed key (operators only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/operator/ai-providers/{id}/check:
+    post:
+      security: [{ session: [] }]
+      summary: Ask the provider one small structured question and record whether it answered (operators only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The provider with check_ok and check_message set, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/operator/ledger:
+    get:
+      security: [{ session: [] }]
+      summary: Platform account balances, what wallets hold, and whether the ledger balances (operators only)
+      responses:
+        "200": { description: Ledger }
   /v1/operator/payers:
     get:
       security: [{ session: [] }]
@@ -593,6 +921,48 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/OperatorPayer" } }
         "403": { $ref: "#/components/responses/Error" }
+  /v1/operator/payers/import:
+    post:
+      security: [{ session: [] }]
+      summary: Import payers from an export of Serenity's payers (operators only)
+      description: |
+        Columns: name, platform, external_reference_id, country, is_active (the query is in
+        docs/serenity-payers.md). Each row is planned as add, fill (a missing setting), same, conflict
+        or skip; settings already in the catalogue are never overwritten. With `dry_run` nothing is saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: byte, description: The .csv or .xlsx file, base64 }
+                dry_run: { type: boolean }
+      responses:
+        "200":
+          description: The plan for each row, and how many payers were saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  saved: { type: integer }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        line: { type: integer }
+                        id: { type: string }
+                        name: { type: string }
+                        connector: { type: string }
+                        action: { enum: [add, fill, same, conflict, skip] }
+                        fields: { type: object, additionalProperties: { type: string } }
+                        reason: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/operator/payers/{id}:
     put:
       security: [{ session: [] }]
@@ -805,6 +1175,88 @@ components:
     IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
     ClaimID: { name: id, in: path, required: true, schema: { type: string } }
   responses:
+    Wallet:
+      type: object
+      properties:
+        currency: { type: string }
+        balance: { type: integer }
+        reserved: { type: integer }
+        available: { type: integer }
+        pending_withdrawals: { type: integer }
+        plan: { type: string }
+        price: { type: object, properties: { monthly_fee: { type: integer }, per_claim: { type: integer }, included: { type: integer } } }
+        charged_this_month: { type: integer }
+        can_send_live: { type: boolean }
+    Funding:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+        status: { enum: [pending, succeeded, failed, abandoned] }
+        paid_amount: { type: integer }
+        fee: { type: integer }
+        provider_reference: { type: string }
+        checkout_url: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    PaymentProvider:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        currencies: { type: array, items: { type: string } }
+        channels: { type: array, items: { type: string } }
+        payouts: { type: boolean }
+        sandbox: { type: boolean }
+    PayoutAccount:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        type: { enum: [bank, mobile_money] }
+        name: { type: string }
+        bank_code: { type: string }
+        bank_name: { type: string }
+        account_number: { type: string }
+        currency: { type: string }
+    AIProvider:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [anthropic, openai, openai_compatible] }
+        name: { type: string }
+        base_url: { type: string }
+        model: { type: string }
+        effort: { type: string }
+        json_mode: { type: string }
+        tasks: { type: array, items: { type: string } }
+        priority: { type: integer }
+        enabled: { type: boolean }
+        has_key: { type: boolean }
+        key_hint: { type: string, description: Last four characters of the saved key }
+        checked_at: { type: string, format: date-time }
+        check_ok: { type: boolean }
+        check_message: { type: string }
+        updated_at: { type: string, format: date-time }
+    Withdrawal:
+      type: object
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        organization_name: { type: string }
+        payout_account_id: { type: string }
+        destination: { type: string }
+        provider: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+        status: { enum: [requested, approved, paying, paid, failed, rejected] }
+        reason: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
     CodesApplied:
       description: Applied
       content:

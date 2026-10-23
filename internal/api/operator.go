@@ -22,6 +22,7 @@ import (
 // Only a signed-in operator reaches them; every change is logged.
 func (s *Server) operatorRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /v1/operator/payers", s.operator(s.opListPayers))
+	mux.Handle("POST /v1/operator/payers/import", s.operator(s.opImportPayers))
 	mux.Handle("PUT /v1/operator/payers/{id}", s.operator(s.opPutPayer))
 	mux.Handle("GET /v1/operator/payers/{id}/codes", s.operator(s.opPayerCodes))
 	mux.Handle("PUT /v1/operator/payers/{id}/codes", s.operator(s.opPutCodes))

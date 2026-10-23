@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ImportPayersForm } from "@/components/operator-forms";
 import { api } from "@/lib/api";
 import { fieldLabels } from "@/lib/format";
 import { requireOperator } from "@/lib/session";
@@ -27,10 +28,16 @@ export default async function Catalogue() {
         <div>
           <h1>Catalogue</h1>
           <p className="app-finding">
-            {ready} of {live.length} payers take claims today. {unmapped ? `${unmapped} still have standard items without a code.` : "Every payer has a code for every standard item."}
+            {ready} of {live.length} payers take claims today.{" "}
+            {unmapped
+              ? `${unmapped} still have standard items without a code.`
+              : "Every payer has a code for every standard item."}
           </p>
         </div>
-        <Link href="/console/operator/new" className="app-button app-button--primary">
+        <Link
+          href="/console/operator/new"
+          className="app-button app-button--primary"
+        >
           Add a payer
         </Link>
       </div>
@@ -58,7 +65,10 @@ export default async function Catalogue() {
               return (
                 <tr key={p.id}>
                   <td>
-                    <Link href={`/console/operator/${p.id}`} className="app-strong-link">
+                    <Link
+                      href={`/console/operator/${p.id}`}
+                      className="app-strong-link"
+                    >
                       {p.name}
                     </Link>
                     <span className="app-muted app-block">
@@ -68,33 +78,72 @@ export default async function Catalogue() {
                   </td>
                   <td className="hide-sm">
                     {p.connector.name}
-                    <span className="app-muted app-block">{p.kind === "integrated" ? "Platform" : "Direct"}</span>
+                    <span className="app-muted app-block">
+                      {p.kind === "integrated" ? "Platform" : "Direct"}
+                    </span>
                   </td>
                   <td>
                     {p.inactive ? (
-                      <span className="app-pill app-pill--neutral">Withdrawn</span>
+                      <span className="app-pill app-pill--neutral">
+                        Withdrawn
+                      </span>
                     ) : p.missing_fields.length ? (
-                      <span className="app-pill app-pill--bad">Needs {p.missing_fields.map((f) => label(p.connector.id, f)).join(", ")}</span>
+                      <span className="app-pill app-pill--bad">
+                        Needs{" "}
+                        {p.missing_fields
+                          .map((f) => label(p.connector.id, f))
+                          .join(", ")}
+                      </span>
                     ) : p.status === "available" ? (
-                      <span className="app-pill app-pill--good">Taking claims</span>
+                      <span className="app-pill app-pill--good">
+                        Taking claims
+                      </span>
                     ) : (
-                      <span className="app-pill app-pill--wait">Connector not ported</span>
+                      <span className="app-pill app-pill--wait">
+                        Connector not ported
+                      </span>
                     )}
                   </td>
                   <td className="app-tnum">
                     {p.coded_items} of {p.total_items}
-                    <span className={`app-meter${share < 1 ? " app-meter--part" : ""}`} aria-hidden="true">
+                    <span
+                      className={`app-meter${share < 1 ? " app-meter--part" : ""}`}
+                      aria-hidden="true"
+                    >
                       <span style={{ width: `${Math.round(share * 100)}%` }} />
                     </span>
                   </td>
                   <td className="hide-sm app-tnum">
-                    {p.list_size ? `${p.list_size.toLocaleString("en-GB")} codes` : <span className="app-dash">–</span>}
+                    {p.list_size ? (
+                      `${p.list_size.toLocaleString("en-GB")} codes`
+                    ) : (
+                      <span className="app-dash">–</span>
+                    )}
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      </section>
+      <section className="app-card" aria-labelledby="imp-h">
+        <h2 id="imp-h" className="app-card__title">
+          Import payers
+        </h2>
+        <p className="app-muted">
+          Load the payers Serenity reaches today, with each one&apos;s platform
+          and reference. New payers are added; settings already in the catalogue
+          are never overwritten. The query to export them is in
+          docs/serenity-payers.md.
+        </p>
+        <ImportPayersForm
+          platforms={Object.fromEntries(
+            (connectors.ok ? connectors.data.data : []).map((c) => [
+              c.id,
+              c.name,
+            ]),
+          )}
+        />
       </section>
     </div>
   );

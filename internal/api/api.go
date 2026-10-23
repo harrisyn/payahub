@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.Handle("POST /v1/claims", s.auth(s.createClaim))
+	mux.Handle("POST /v1/claims/import", s.auth(s.importClaims))
 	mux.Handle("POST /v1/claims/validate", s.auth(s.validateClaim))
 	mux.Handle("GET /v1/claims/{id}", s.auth(s.getClaim))
 	mux.Handle("GET /v1/claims/{id}/events", s.auth(s.claimEvents))
@@ -45,6 +46,8 @@ func (s *Server) Handler() http.Handler {
 	s.operatorRoutes(mux)
 	s.leadRoutes(mux)
 	s.priceRoutes(mux)
+	s.walletRoutes(mux)
+	s.aiRoutes(mux)
 	return mux
 }
 
@@ -119,17 +122,9 @@ func (s *Server) readInput(w http.ResponseWriter, r *http.Request) (*claim.Input
 		return nil, nil, false
 	}
 	in.Normalize(func() string { return store.NewID("ln") })
-	if err := s.applyPriceList(r.Context(), orgFrom(r.Context()).ID, &in, raw); err != nil {
+	if err := s.completeInput(r.Context(), orgFrom(r.Context()).ID, &in, pricesGiven(raw, len(in.Lines))); err != nil {
 		s.internal(w, r, err)
 		return nil, nil, false
-	}
-	for i := range in.Diagnoses {
-		d := &in.Diagnoses[i]
-		if d.Code.Display == "" && icd10.Is(d.Code.System) {
-			if c, st := icd10.Check(d.Code.Value); st == icd10.Listed {
-				d.Code.Display = c.Title
-			}
-		}
 	}
 	if errs := in.Check(); len(errs) > 0 {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_claim", "The claim has missing or invalid fields.", errs)
@@ -141,53 +136,6 @@ func (s *Server) readInput(w http.ResponseWriter, r *http.Request) (*claim.Input
 	}
 	sum := sha256.Sum256(raw)
 	return &in, sum[:], true
-}
-
-// applyPriceList completes lines that name one of the organisation's own
-// codes from its price list: the price when the line gives none (an explicit
-// 0 stays 0) and the description when it is empty. A price in another
-// currency than the claim's is never used.
-func (s *Server) applyPriceList(ctx context.Context, orgID string, in *claim.Input, raw []byte) error {
-	var given struct {
-		Lines []struct {
-			UnitPrice json.RawMessage `json:"unit_price"`
-		} `json:"lines"`
-	}
-	if err := json.Unmarshal(raw, &given); err != nil {
-		return nil // the strict decode above already accepted it; nothing to add
-	}
-	var codes []string
-	for i := range in.Lines {
-		in.Lines[i].PriceFrom = ""
-		if l := in.Lines[i]; l.Code != nil && l.Code.System != catalog.System && l.Code.Value != "" {
-			codes = append(codes, l.Code.Value)
-		}
-	}
-	if len(codes) == 0 {
-		return nil
-	}
-	prices, err := store.PricesFor(ctx, s.Store.Pool, orgID, codes)
-	if err != nil || len(prices) == 0 {
-		return err
-	}
-	for i := range in.Lines {
-		l := &in.Lines[i]
-		if l.Code == nil || l.Code.System == catalog.System {
-			continue
-		}
-		p, ok := prices[l.Code.Value]
-		if !ok {
-			continue
-		}
-		if strings.TrimSpace(l.Description) == "" {
-			l.Description = p.Name
-		}
-		if i < len(given.Lines) && given.Lines[i].UnitPrice == nil && p.Currency == in.Currency {
-			l.UnitPrice = p.UnitPrice
-			l.PriceFrom = "price_list"
-		}
-	}
-	return nil
 }
 
 func newClaim(org store.Org, in *claim.Input, sha []byte) *claim.Claim {
@@ -299,6 +247,9 @@ func (s *Server) submitClaim(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, queue.ErrTrialLimit):
 		writeError(w, http.StatusPaymentRequired, "trial_limit",
 			"Your trial has no live claims left. Choose a plan to keep sending live claims.", nil)
+	case errors.Is(err, queue.ErrWalletEmpty):
+		writeError(w, http.StatusPaymentRequired, "wallet_empty",
+			"Your wallet does not cover another live claim. Add funds to keep sending live claims.", nil)
 	case errors.Is(err, queue.ErrNotSubmittable):
 		writeError(w, http.StatusUnprocessableEntity, "not_submittable",
 			"The claim did not pass validation; it is now "+string(c.State)+".", v.Issues)
@@ -307,4 +258,73 @@ func (s *Server) submitClaim(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]any{"claim": c, "issues": v.Issues})
 	}
+}
+
+// pricesGiven reports, for each line of a raw claim request, whether it
+// carries unit_price at all (an explicit 0 counts).
+func pricesGiven(raw []byte, n int) []bool {
+	var given struct {
+		Lines []struct {
+			UnitPrice json.RawMessage `json:"unit_price"`
+		} `json:"lines"`
+	}
+	out := make([]bool, n)
+	if json.Unmarshal(raw, &given) != nil {
+		for i := range out {
+			out[i] = true
+		}
+		return out
+	}
+	for i := range out {
+		out[i] = i >= len(given.Lines) || given.Lines[i].UnitPrice != nil
+	}
+	return out
+}
+
+// completeInput fills what the organisation's own data says about a claim:
+// lines naming one of its price list codes get the price when they give
+// none (an explicit 0 stays 0) and the description when it is empty, never
+// a price in another currency than the claim's; ICD-10 diagnoses get their
+// title.
+func (s *Server) completeInput(ctx context.Context, orgID string, in *claim.Input, priceGiven []bool) error {
+	for i := range in.Diagnoses {
+		d := &in.Diagnoses[i]
+		if d.Code.Display == "" && icd10.Is(d.Code.System) {
+			if c, st := icd10.Check(d.Code.Value); st == icd10.Listed {
+				d.Code.Display = c.Title
+			}
+		}
+	}
+	var codes []string
+	for i := range in.Lines {
+		in.Lines[i].PriceFrom = ""
+		if l := in.Lines[i]; l.Code != nil && l.Code.System != catalog.System && l.Code.Value != "" {
+			codes = append(codes, l.Code.Value)
+		}
+	}
+	if len(codes) == 0 {
+		return nil
+	}
+	prices, err := store.PricesFor(ctx, s.Store.Pool, orgID, codes)
+	if err != nil || len(prices) == 0 {
+		return err
+	}
+	for i := range in.Lines {
+		l := &in.Lines[i]
+		if l.Code == nil || l.Code.System == catalog.System {
+			continue
+		}
+		p, ok := prices[l.Code.Value]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(l.Description) == "" {
+			l.Description = p.Name
+		}
+		if i < len(priceGiven) && !priceGiven[i] && p.Currency == in.Currency {
+			l.UnitPrice = p.UnitPrice
+			l.PriceFrom = "price_list"
+		}
+	}
+	return nil
 }

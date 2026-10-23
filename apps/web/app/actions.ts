@@ -1,13 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { api, SESSION_COOKIE } from "@/lib/api";
-import type { APIKey, Method, Profile, Suggestion } from "@/lib/types";
+import type { AIProvider, APIKey, Funding, Method, PayoutAccount, Profile, Suggestion, Withdrawal } from "@/lib/types";
 
-export type FormState = { error?: string; fields?: Record<string, string>; ok?: string };
+export type FormState = {
+  error?: string;
+  fields?: Record<string, string>;
+  ok?: string;
+  // What was submitted, for a form that puts it back after a failed save.
+  values?: Record<string, string | string[] | number | boolean>;
+};
 
 // A key is shown once, right after it is made: it rides in a short-lived
 // httpOnly cookie to the next page, which shows it until it is dismissed.
@@ -423,4 +429,220 @@ export async function confirmItems(form: FormData) {
     if (!res.ok) break;
   }
   revalidatePath("/console", "layout");
+}
+
+export type PayerImportRow = {
+  line: number;
+  id: string;
+  name: string;
+  connector: string;
+  action: "add" | "fill" | "same" | "conflict" | "skip";
+  fields?: Record<string, string>;
+  reason?: string;
+};
+export type PayerImportState = FormState & { rows?: PayerImportRow[]; file?: string; saved?: number };
+
+// importPayers checks a file first (nothing saved) and keeps it, so the
+// operator can import exactly what they saw.
+export async function importPayers(_: PayerImportState, form: FormData): Promise<PayerImportState> {
+  const upload = form.get("upload");
+  let file = text(form, "file");
+  if (upload instanceof File && upload.size > 0) {
+    if (upload.size > 6 << 20) return { error: "The file is over 6 MB." };
+    file = Buffer.from(await upload.arrayBuffer()).toString("base64");
+  }
+  if (!file) return { error: "Choose the CSV or Excel export of Serenity's payers." };
+  const dryRun = text(form, "intent") !== "import";
+  const res = await api<{ rows: PayerImportRow[]; saved: number }>("/v1/operator/payers/import", {
+    method: "POST",
+    body: { file, dry_run: dryRun },
+  });
+  if (!res.ok) return { error: res.error.message };
+  if (dryRun) return { rows: res.data.rows, file };
+  revalidatePath("/console", "layout");
+  return {
+    rows: res.data.rows,
+    saved: res.data.saved,
+    ok: `${res.data.saved} ${res.data.saved === 1 ? "payer" : "payers"} saved.`,
+  };
+}
+
+export type ImportedClaim = {
+  reference: string;
+  rows: number[];
+  payer_id?: string;
+  member_number?: string;
+  lines: number;
+  total: number;
+  currency?: string;
+  errors: { field: string; message: string }[];
+  issues: { code: string; severity: "error" | "warning" | "review"; field: string; message: string }[];
+  state?: "draft" | "needs_review" | "ready";
+  claim_id?: string;
+  replayed?: boolean;
+  queued?: boolean;
+};
+export type ClaimUploadState = FormState & { claims?: ImportedClaim[]; file?: string; saved?: boolean };
+
+// uploadClaims checks a file of claim lines first (nothing saved) and keeps
+// it, so what is saved is exactly what the person saw.
+export async function uploadClaims(_: ClaimUploadState, form: FormData): Promise<ClaimUploadState> {
+  const upload = form.get("upload");
+  let file = text(form, "file");
+  if (upload instanceof File && upload.size > 0) {
+    if (upload.size > 16 << 20) return { error: "The file is over 16 MB. Split it and upload each part." };
+    file = Buffer.from(await upload.arrayBuffer()).toString("base64");
+  }
+  if (!file) return { error: "Choose a CSV or Excel file of claim lines." };
+  const intent = text(form, "intent");
+  const res = await api<{ claims: ImportedClaim[]; ready: number }>("/v1/claims/import", {
+    method: "POST",
+    body: { file, dry_run: intent === "check", submit: intent === "send" },
+  });
+  if (!res.ok) return { error: res.error.message };
+  if (intent === "check") return { claims: res.data.claims, file };
+  revalidatePath("/console", "layout");
+  const saved = res.data.claims.filter((c) => c.claim_id).length;
+  const queued = res.data.claims.filter((c) => c.queued).length;
+  return {
+    claims: res.data.claims,
+    saved: true,
+    ok: `${saved} ${saved === 1 ? "claim" : "claims"} saved${queued ? `, ${queued} sent to the insurer` : ""}.`,
+  };
+}
+
+// Money typed in cedis becomes pesewas; anything else is refused rather
+// than guessed.
+function cedis(raw: string): number | null {
+  const s = raw.replace(/[,\s]/g, "").replace(/^GHS/i, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  return Math.round(parseFloat(s) * 100);
+}
+
+async function origin(): Promise<string> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+// addFunds opens a checkout at the chosen provider and sends the browser
+// there; the provider sends it back to the wallet page, which settles it.
+export async function addFunds(_: FormState, form: FormData): Promise<FormState> {
+  const amount = cedis(text(form, "amount"));
+  if (amount === null) return { fields: { amount: "Enter an amount in cedis, like 500 or 500.00." } };
+  const res = await api<Funding>("/v1/wallet/fundings", {
+    method: "POST",
+    body: { amount, provider: text(form, "provider"), callback_url: `${await origin()}/console/wallet` },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: d && typeof d === "object" ? undefined : res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  if (!res.data.checkout_url) return { error: "The provider did not give a payment page. Try again." };
+  redirect(res.data.checkout_url);
+}
+
+export async function addPayoutAccount(_: FormState, form: FormData): Promise<FormState> {
+  const res = await api<PayoutAccount>("/v1/wallet/payout-accounts", {
+    method: "POST",
+    body: {
+      provider: text(form, "provider"),
+      type: text(form, "type"),
+      name: text(form, "name"),
+      bank_code: text(form, "bank_code"),
+      account_number: text(form, "account_number"),
+    },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  revalidatePath("/console/wallet");
+  return { ok: `${res.data.bank_name || res.data.bank_code} ${res.data.account_number} added.` };
+}
+
+export async function removePayoutAccount(form: FormData) {
+  await api(`/v1/wallet/payout-accounts/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  revalidatePath("/console/wallet");
+}
+
+export async function requestWithdrawal(_: FormState, form: FormData): Promise<FormState> {
+  const amount = cedis(text(form, "amount"));
+  if (amount === null) return { fields: { amount: "Enter an amount in cedis, like 250 or 250.00." } };
+  const res = await api<Withdrawal>("/v1/wallet/withdrawals", {
+    method: "POST",
+    body: { amount, payout_account_id: text(form, "payout_account_id"), reason: text(form, "reason") },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  revalidatePath("/console/wallet");
+  return { ok: "Requested. The amount is held in your wallet until it is paid; most are paid the same working day." };
+}
+
+export async function decideWithdrawal(_: FormState, form: FormData): Promise<FormState> {
+  const id = encodeURIComponent(text(form, "id"));
+  const approve = text(form, "decision") === "approve";
+  const res = await api<Withdrawal>(`/v1/operator/withdrawals/${id}/${approve ? "approve" : "reject"}`, {
+    method: "POST",
+    body: approve ? undefined : { reason: text(form, "reason") },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  revalidatePath("/console/operator/withdrawals");
+  return { ok: approve ? "Approved; the payout is on its way." : "Rejected; the amount is back in their wallet." };
+}
+
+// saveAIProvider creates or changes a model provider. The key field is left
+// empty to keep the sealed key.
+export async function saveAIProvider(_: FormState, form: FormData): Promise<FormState> {
+  const id = text(form, "id").toLowerCase();
+  const values = {
+    id,
+    kind: text(form, "kind"),
+    name: text(form, "name"),
+    base_url: text(form, "base_url"),
+    model: text(form, "model"),
+    effort: text(form, "effort"),
+    json_mode: text(form, "json_mode"),
+    tasks: form.getAll("tasks").map(String),
+    priority: text(form, "priority"),
+    enabled: form.get("enabled") === "on",
+  };
+  const res = await api<AIProvider>(`/v1/operator/ai-providers/${encodeURIComponent(id || "_")}`, {
+    method: "PUT",
+    body: {
+      kind: text(form, "kind"),
+      name: text(form, "name"),
+      base_url: text(form, "base_url"),
+      model: text(form, "model"),
+      effort: text(form, "effort"),
+      json_mode: text(form, "json_mode"),
+      tasks: form.getAll("tasks").map(String),
+      priority: Number(text(form, "priority") || 0),
+      enabled: form.get("enabled") === "on",
+      api_key: text(form, "api_key"),
+    },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined, values };
+  }
+  revalidatePath("/console/operator/ai");
+  redirect(`/console/operator/ai?saved=${encodeURIComponent(res.data.id)}`);
+}
+
+export async function checkAIProvider(form: FormData) {
+  await api(`/v1/operator/ai-providers/${encodeURIComponent(text(form, "id"))}/check`, { method: "POST" });
+  revalidatePath("/console/operator/ai");
+}
+
+export async function deleteAIProvider(form: FormData) {
+  await api(`/v1/operator/ai-providers/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  revalidatePath("/console/operator/ai");
+  redirect("/console/operator/ai");
 }
