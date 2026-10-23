@@ -271,6 +271,10 @@ paths:
     put:
       security: [{ session: [] }]
       summary: Choose a plan. Enterprise is recorded as a request and agreed offline.
+      description: |
+        A plan with a monthly fee charges this month's fee from the wallet at once, less any fee already
+        charged this month; `charged` says how much. The fee may take the wallet below zero, which pauses
+        live claims until it is funded.
       requestBody:
         required: true
         content:
@@ -285,7 +289,7 @@ paths:
           description: Saved
           content:
             application/json:
-              schema: { type: object, properties: { plan: { $ref: "#/components/schemas/Plan" } } }
+              schema: { type: object, properties: { plan: { $ref: "#/components/schemas/Plan" }, charged: { type: integer } } }
         "422": { $ref: "#/components/responses/Error" }
   /v1/api-keys:
     get:
@@ -632,6 +636,211 @@ paths:
       responses:
         "204": { description: Removed }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/payment-providers:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Payment providers configured for funding wallets and paying withdrawals
+      responses:
+        "200": { description: Providers, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PaymentProvider" } } } } } } }
+  /v1/payment-providers/{id}/banks:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Banks and mobile networks a provider pays out to
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: currency, in: query, schema: { type: string, default: GHS } }
+      responses:
+        "200": { description: Banks, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { type: object, properties: { code: { type: string }, name: { type: string }, type: { enum: [bank, mobile_money] } } } } } } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/wallet:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: The organisation's wallet
+      description: |
+        `available` is the balance less what live claims in flight will cost once acknowledged. On a
+        wallet plan a live claim is refused (402 `wallet_empty`) when `available` does not cover one more.
+      responses:
+        "200": { description: Wallet, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/wallet/transactions:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: The wallet's statement, newest first
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: before, in: query, description: next_before from the previous page, schema: { type: string } }
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  next_before: { type: string }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        seq: { type: integer }
+                        transaction_id: { type: string }
+                        kind: { enum: [funding, charge, fee, withdrawal, withdrawal_returned, adjustment] }
+                        memo: { type: string }
+                        amount: { type: integer, description: Minor units; positive adds to the wallet }
+                        balance_after: { type: integer }
+                        reference: { type: string, description: The claim, funding or withdrawal it is for }
+                        created_at: { type: string, format: date-time }
+  /v1/wallet/fundings:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Start a checkout that funds the wallet
+      description: |
+        Returns a `checkout_url` at the provider. The wallet is credited only when the provider confirms
+        the payment (on `GET /v1/wallet/fundings/{id}`, the provider's webhook, or the periodic check),
+        exactly once. Honours `Idempotency-Key`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, provider]
+              properties:
+                amount: { type: integer, minimum: 100, maximum: 10000000, description: Minor units of GHS }
+                provider: { type: string }
+                callback_url: { type: string, format: uri, description: Where the provider sends the browser afterwards }
+      responses:
+        "201": { description: Checkout started, content: { application/json: { schema: { $ref: "#/components/schemas/Funding" } } } }
+        "200": { description: A repeat of an earlier request with the same Idempotency-Key, content: { application/json: { schema: { $ref: "#/components/schemas/Funding" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Recent fundings
+      responses:
+        "200": { description: Fundings, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Funding" } } } } } } }
+  /v1/wallet/fundings/{id}:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: A funding, confirmed with the provider first while it is pending
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Funding, content: { application/json: { schema: { $ref: "#/components/schemas/Funding" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/wallet/payout-accounts:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Where withdrawals go
+      responses:
+        "200": { description: Accounts, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/PayoutAccount" } } } } } } }
+    post:
+      security: [{ session: [] }]
+      summary: Add a bank or mobile money account for withdrawals (console session only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, type, name, bank_code, account_number]
+              properties:
+                provider: { type: string }
+                type: { enum: [bank, mobile_money] }
+                name: { type: string }
+                bank_code: { type: string }
+                account_number: { type: string }
+      responses:
+        "201": { description: Added, content: { application/json: { schema: { $ref: "#/components/schemas/PayoutAccount" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/wallet/payout-accounts/{id}:
+    delete:
+      security: [{ session: [] }]
+      summary: Remove a payout account
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/wallet/withdrawals:
+    get:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Recent withdrawals
+      responses:
+        "200": { description: Withdrawals, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Withdrawal" } } } } } } }
+    post:
+      security: [{ session: [] }]
+      summary: Ask to withdraw from the wallet (console session only)
+      description: |
+        The amount is held in the wallet at once and paid after a Payahub operator approves it; a
+        rejected or failed payout returns it. Money held for live claims in flight cannot be withdrawn.
+        Honours `Idempotency-Key`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, payout_account_id]
+              properties:
+                amount: { type: integer, minimum: 100 }
+                payout_account_id: { type: string }
+                reason: { type: string }
+      responses:
+        "201": { description: Requested, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "200": { description: A repeat with the same Idempotency-Key, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/webhooks/payments/{provider}:
+    post:
+      summary: A payment provider's webhook
+      description: |
+        Signature-checked per provider (Paystack: `x-paystack-signature`, HMAC-SHA512 of the body).
+        A notice only prompts a check with the provider; money moves on the provider's own record.
+      parameters: [{ name: provider, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Taken }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/operator/withdrawals:
+    get:
+      security: [{ session: [] }]
+      summary: Withdrawals across organisations (operators only)
+      parameters: [{ name: status, in: query, description: Comma-separated statuses, schema: { type: string } }]
+      responses:
+        "200": { description: Withdrawals, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Withdrawal" } } } } } } }
+  /v1/operator/withdrawals/{id}/approve:
+    post:
+      security: [{ session: [] }]
+      summary: Approve a requested withdrawal; its payout is queued in the same transaction
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Approved, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/operator/withdrawals/{id}/reject:
+    post:
+      security: [{ session: [] }]
+      summary: Reject a requested withdrawal and return its amount to the wallet
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } } }
+      responses:
+        "200": { description: Rejected, content: { application/json: { schema: { $ref: "#/components/schemas/Withdrawal" } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/operator/wallets/{org}/adjustments:
+    post:
+      security: [{ session: [] }]
+      summary: Credit (positive) or debit an organisation's wallet with a reason (operators only)
+      parameters:
+        - { name: org, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount, memo], properties: { amount: { type: integer }, memo: { type: string } } } } } }
+      responses:
+        "201": { description: Posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+        "200": { description: A repeat; nothing posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/operator/ledger:
+    get:
+      security: [{ session: [] }]
+      summary: Platform account balances, what wallets hold, and whether the ledger balances (operators only)
+      responses:
+        "200": { description: Ledger }
   /v1/operator/payers:
     get:
       security: [{ session: [] }]
@@ -822,6 +1031,69 @@ components:
     IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
     ClaimID: { name: id, in: path, required: true, schema: { type: string } }
   responses:
+    Wallet:
+      type: object
+      properties:
+        currency: { type: string }
+        balance: { type: integer }
+        reserved: { type: integer }
+        available: { type: integer }
+        pending_withdrawals: { type: integer }
+        plan: { type: string }
+        price: { type: object, properties: { monthly_fee: { type: integer }, per_claim: { type: integer }, included: { type: integer } } }
+        charged_this_month: { type: integer }
+        can_send_live: { type: boolean }
+    Funding:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+        status: { enum: [pending, succeeded, failed, abandoned] }
+        paid_amount: { type: integer }
+        fee: { type: integer }
+        provider_reference: { type: string }
+        checkout_url: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    PaymentProvider:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        currencies: { type: array, items: { type: string } }
+        channels: { type: array, items: { type: string } }
+        payouts: { type: boolean }
+        sandbox: { type: boolean }
+    PayoutAccount:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        type: { enum: [bank, mobile_money] }
+        name: { type: string }
+        bank_code: { type: string }
+        bank_name: { type: string }
+        account_number: { type: string }
+        currency: { type: string }
+    Withdrawal:
+      type: object
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        organization_name: { type: string }
+        payout_account_id: { type: string }
+        destination: { type: string }
+        provider: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+        status: { enum: [requested, approved, paying, paid, failed, rejected] }
+        reason: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
     CodesApplied:
       description: Applied
       content:

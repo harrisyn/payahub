@@ -21,7 +21,7 @@ type Sandbox struct {
 }
 
 func (s *Sandbox) Info() Info {
-	return Info{ID: "sandbox", Name: "Sandbox payments", Currencies: []string{"GHS", "NGN", "KES", "USD"},
+	return Info{ID: "sandbox", Name: "Sandbox checkout", Currencies: []string{"GHS", "NGN", "KES", "USD"},
 		Channels: []string{"card", "mobile_money"}, Payouts: true, Sandbox: true}
 }
 

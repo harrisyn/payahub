@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { api, SESSION_COOKIE } from "@/lib/api";
-import type { APIKey, Method, Profile, Suggestion } from "@/lib/types";
+import type { APIKey, Funding, Method, PayoutAccount, Profile, Suggestion, Withdrawal } from "@/lib/types";
 
 export type FormState = { error?: string; fields?: Record<string, string>; ok?: string };
 
@@ -503,4 +503,90 @@ export async function uploadClaims(_: ClaimUploadState, form: FormData): Promise
     saved: true,
     ok: `${saved} ${saved === 1 ? "claim" : "claims"} saved${queued ? `, ${queued} sent to the insurer` : ""}.`,
   };
+}
+
+// Money typed in cedis becomes pesewas; anything else is refused rather
+// than guessed.
+function cedis(raw: string): number | null {
+  const s = raw.replace(/[,\s]/g, "").replace(/^GHS/i, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  return Math.round(parseFloat(s) * 100);
+}
+
+async function origin(): Promise<string> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+// addFunds opens a checkout at the chosen provider and sends the browser
+// there; the provider sends it back to the wallet page, which settles it.
+export async function addFunds(_: FormState, form: FormData): Promise<FormState> {
+  const amount = cedis(text(form, "amount"));
+  if (amount === null) return { fields: { amount: "Enter an amount in cedis, like 500 or 500.00." } };
+  const res = await api<Funding>("/v1/wallet/fundings", {
+    method: "POST",
+    body: { amount, provider: text(form, "provider"), callback_url: `${await origin()}/console/wallet` },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: d && typeof d === "object" ? undefined : res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  if (!res.data.checkout_url) return { error: "The provider did not give a payment page. Try again." };
+  redirect(res.data.checkout_url);
+}
+
+export async function addPayoutAccount(_: FormState, form: FormData): Promise<FormState> {
+  const res = await api<PayoutAccount>("/v1/wallet/payout-accounts", {
+    method: "POST",
+    body: {
+      provider: text(form, "provider"),
+      type: text(form, "type"),
+      name: text(form, "name"),
+      bank_code: text(form, "bank_code"),
+      account_number: text(form, "account_number"),
+    },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  revalidatePath("/console/wallet");
+  return { ok: `${res.data.bank_name || res.data.bank_code} ${res.data.account_number} added.` };
+}
+
+export async function removePayoutAccount(form: FormData) {
+  await api(`/v1/wallet/payout-accounts/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  revalidatePath("/console/wallet");
+}
+
+export async function requestWithdrawal(_: FormState, form: FormData): Promise<FormState> {
+  const amount = cedis(text(form, "amount"));
+  if (amount === null) return { fields: { amount: "Enter an amount in cedis, like 250 or 250.00." } };
+  const res = await api<Withdrawal>("/v1/wallet/withdrawals", {
+    method: "POST",
+    body: { amount, payout_account_id: text(form, "payout_account_id"), reason: text(form, "reason") },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  revalidatePath("/console/wallet");
+  return { ok: "Requested. The amount is held in your wallet until it is paid; most are paid the same working day." };
+}
+
+export async function decideWithdrawal(_: FormState, form: FormData): Promise<FormState> {
+  const id = encodeURIComponent(text(form, "id"));
+  const approve = text(form, "decision") === "approve";
+  const res = await api<Withdrawal>(`/v1/operator/withdrawals/${id}/${approve ? "approve" : "reject"}`, {
+    method: "POST",
+    body: approve ? undefined : { reason: text(form, "reason") },
+  });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d && typeof d === "object" ? d : undefined };
+  }
+  revalidatePath("/console/operator/withdrawals");
+  return { ok: approve ? "Approved; the payout is on its way." : "Rejected; the amount is back in their wallet." };
 }

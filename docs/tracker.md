@@ -78,7 +78,12 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Brand: Ananse exchange logo and palette (PR #3)
 - [ ] Team members and roles
 - [ ] Webhooks to the clinic's system on every state change
-- [ ] Billing and usage (Paystack)
+- [x] Wallets: double-entry ledger; organisation and platform wallets; per-claim charges on acknowledgement and
+      monthly fees from the wallet; live claims pause when the wallet does not cover one more
+- [x] Payment providers behind one interface: Paystack (card, mobile money, bank payouts) and a sandbox;
+      fundings credited only from the provider's verification; withdrawals approved by an operator, then paid
+- [ ] Paystack live keys and webhook URL set in production; first real funding checked end to end
+- [ ] A second payment provider (e.g. Hubtel or Flutterwave) once a customer needs it
 - [ ] Throughput test at scale on the full path
 
 ## Waiting on the owner

@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/harrisyn/payahub/internal/onboarding"
@@ -84,14 +83,14 @@ func (s *Server) walletTransactions(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
 		limit = n
 	}
-	var before *time.Time
+	var before int64
 	if b := r.URL.Query().Get("before"); b != "" {
-		t, err := time.Parse(time.RFC3339Nano, b)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_cursor", "before must be an RFC 3339 time from next_before.", nil)
+		n, err := strconv.ParseInt(b, 10, 64)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_cursor", "before must be the next_before of a previous page.", nil)
 			return
 		}
-		before = &t
+		before = n
 	}
 	entries, err := s.Store.WalletStatement(r.Context(), orgFrom(r.Context()).ID, before, limit)
 	if err != nil {
@@ -100,7 +99,7 @@ func (s *Server) walletTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"data": entries}
 	if len(entries) == limit {
-		out["next_before"] = entries[len(entries)-1].CreatedAt.Format(time.RFC3339Nano)
+		out["next_before"] = strconv.FormatInt(entries[len(entries)-1].Seq, 10)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

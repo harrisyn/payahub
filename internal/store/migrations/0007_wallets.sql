@@ -111,3 +111,8 @@ CREATE INDEX IF NOT EXISTS wallet_withdrawals_open_idx ON wallet_withdrawals (st
     WHERE status IN ('requested', 'approved', 'paying');
 CREATE UNIQUE INDEX IF NOT EXISTS wallet_withdrawals_idem_idx ON wallet_withdrawals (organization_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- Entries are numbered in the order they were written. A wallet's entries
+-- are written under its row lock, so this is the order of its balances.
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS seq bigserial;
+CREATE INDEX IF NOT EXISTS ledger_entries_account_seq_idx ON ledger_entries (account_id, seq DESC);

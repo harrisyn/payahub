@@ -252,5 +252,14 @@ func TestConcurrentWithdrawalsNeverOverdraw(t *testing.T) {
 	if w := wallet(t, ses); w["balance"] != 0.0 {
 		t.Fatalf("balance: %v", w)
 	}
+	// The statement reads in order: each balance is the one below it plus its amount.
+	_, stmt := ses.do(t, "GET", "/v1/wallet/transactions", nil)
+	rows := stmt["data"].([]any)
+	for i := 0; i+1 < len(rows); i++ {
+		a, b := rows[i].(map[string]any), rows[i+1].(map[string]any)
+		if a["balance_after"].(float64)-a["amount"].(float64) != b["balance_after"].(float64) {
+			t.Fatalf("statement out of order at %d: %v then %v", i, a, b)
+		}
+	}
 	balanced(t)
 }

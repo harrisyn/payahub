@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/onboarding"
 	"github.com/harrisyn/payahub/internal/payment"
@@ -40,7 +41,7 @@ func chargeClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim) error {
 	cur := onboarding.BillingCurrency
 	_, _, err = Post(ctx, tx, Posting{
 		Key: "claim:" + c.ID, Kind: "charge", OrgID: c.OrganizationID,
-		Memo:   fmt.Sprintf("Claim %s acknowledged by %s", c.ID, c.PayerID),
+		Memo:   claimMemo(c),
 		Detail: map[string]any{"claim_id": c.ID, "payer_id": c.PayerID, "plan": plan},
 		Legs: []Leg{
 			{Account: WalletAccount(c.OrganizationID, cur), Amount: -price.PerClaim},
@@ -48,6 +49,16 @@ func chargeClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim) error {
 		},
 	})
 	return err
+}
+
+// claimMemo says which claim a charge is for in the clinic's terms: the
+// payer and the member.
+func claimMemo(c *claim.Claim) string {
+	payer := c.PayerID
+	if p, ok := catalog.LookupPayer(c.PayerID); ok {
+		payer = p.Name
+	}
+	return payer + ", member " + c.Member.MemberNumber
 }
 
 // ChargeMonthlyFee charges this month's fee for the organisation's plan, less
@@ -220,6 +231,7 @@ func (s *Store) Wallet(ctx context.Context, orgID string) (Wallet, error) {
 
 // WalletEntry is one line of a wallet statement.
 type WalletEntry struct {
+	Seq           int64     `json:"seq"`
 	TransactionID string    `json:"transaction_id"`
 	Kind          string    `json:"kind"`
 	Memo          string    `json:"memo"`
@@ -229,22 +241,22 @@ type WalletEntry struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// WalletStatement lists the wallet's entries, newest first, before the
-// cursor (a created_at, exclusive) when one is given.
-func (s *Store) WalletStatement(ctx context.Context, orgID string, before *time.Time, limit int) ([]WalletEntry, error) {
+// WalletStatement lists the wallet's entries, newest first, after the
+// cursor (an entry's seq, exclusive) when one is given.
+func (s *Store) WalletStatement(ctx context.Context, orgID string, before int64, limit int) ([]WalletEntry, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT t.id, t.kind, t.memo, e.amount, e.balance_after,
+		SELECT e.seq, t.id, t.kind, t.memo, e.amount, e.balance_after,
 		       COALESCE(t.detail->>'claim_id', t.detail->>'funding_id', t.detail->>'withdrawal_id', ''), e.created_at
 		FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
-		WHERE e.account_id = $1 AND ($2::timestamptz IS NULL OR e.created_at < $2)
-		ORDER BY e.created_at DESC, t.id DESC LIMIT $3`,
+		WHERE e.account_id = $1 AND ($2 = 0 OR e.seq < $2)
+		ORDER BY e.seq DESC LIMIT $3`,
 		WalletAccount(orgID, onboarding.BillingCurrency).ID, before, limit)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (WalletEntry, error) {
 		var e WalletEntry
-		return e, r.Scan(&e.TransactionID, &e.Kind, &e.Memo, &e.Amount, &e.BalanceAfter, &e.Reference, &e.CreatedAt)
+		return e, r.Scan(&e.Seq, &e.TransactionID, &e.Kind, &e.Memo, &e.Amount, &e.BalanceAfter, &e.Reference, &e.CreatedAt)
 	})
 }
 
