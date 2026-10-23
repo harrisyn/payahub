@@ -788,6 +788,7 @@ a.app-id { color: var(--text); }
   .app-confirm { flex-wrap: wrap; }
   .app-table td.num { white-space: nowrap; }
   .app-codecell { width: auto; }
+  .app-tnum { white-space: normal; }
   .app-tabs { overflow-x: auto; white-space: nowrap; gap: 18px; }
   .app-codes { display: table; }
   .app-codes thead { display: none; }

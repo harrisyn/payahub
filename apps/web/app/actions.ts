@@ -424,3 +424,39 @@ export async function confirmItems(form: FormData) {
   }
   revalidatePath("/console", "layout");
 }
+
+export type PayerImportRow = {
+  line: number;
+  id: string;
+  name: string;
+  connector: string;
+  action: "add" | "fill" | "same" | "conflict" | "skip";
+  fields?: Record<string, string>;
+  reason?: string;
+};
+export type PayerImportState = FormState & { rows?: PayerImportRow[]; file?: string; saved?: number };
+
+// importPayers checks a file first (nothing saved) and keeps it, so the
+// operator can import exactly what they saw.
+export async function importPayers(_: PayerImportState, form: FormData): Promise<PayerImportState> {
+  const upload = form.get("upload");
+  let file = text(form, "file");
+  if (upload instanceof File && upload.size > 0) {
+    if (upload.size > 6 << 20) return { error: "The file is over 6 MB." };
+    file = Buffer.from(await upload.arrayBuffer()).toString("base64");
+  }
+  if (!file) return { error: "Choose the CSV or Excel export of Serenity's payers." };
+  const dryRun = text(form, "intent") !== "import";
+  const res = await api<{ rows: PayerImportRow[]; saved: number }>("/v1/operator/payers/import", {
+    method: "POST",
+    body: { file, dry_run: dryRun },
+  });
+  if (!res.ok) return { error: res.error.message };
+  if (dryRun) return { rows: res.data.rows, file };
+  revalidatePath("/console", "layout");
+  return {
+    rows: res.data.rows,
+    saved: res.data.saved,
+    ok: `${res.data.saved} ${res.data.saved === 1 ? "payer" : "payers"} saved.`,
+  };
+}

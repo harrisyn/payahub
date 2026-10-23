@@ -216,31 +216,43 @@ func logChange(ctx context.Context, tx pgx.Tx, payerID, kind, by string, detail 
 
 // SavePayer creates or updates a payer.
 func (s *Store) SavePayer(ctx context.Context, p catalog.Payer, by string) (created bool, err error) {
-	fields, err := json.Marshal(nonNil(p.Fields))
-	if err != nil {
-		return false, err
-	}
+	n, err := s.SavePayers(ctx, []catalog.Payer{p}, by)
+	return n == 1, err
+}
+
+// SavePayers creates or updates payers in one transaction, logging each, and
+// reports how many were new.
+func (s *Store) SavePayers(ctx context.Context, ps []catalog.Payer, by string) (created int, err error) {
 	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		var inserted bool
-		err := tx.QueryRow(ctx, `
-			INSERT INTO catalog_payers (id, name, country, connector, fields, notes, inactive, updated_by, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-			ON CONFLICT (id) DO UPDATE SET name = $2, country = $3, connector = $4, fields = $5, notes = $6,
-				inactive = $7, updated_by = $8, updated_at = now()
-			RETURNING xmax = 0`, p.ID, p.Name, p.Country, p.Connector, fields, p.Notes, p.Inactive, by).Scan(&inserted)
-		if err != nil {
-			return err
+		for _, p := range ps {
+			fields, err := json.Marshal(nonNil(p.Fields))
+			if err != nil {
+				return err
+			}
+			var inserted bool
+			err = tx.QueryRow(ctx, `
+				INSERT INTO catalog_payers (id, name, country, connector, fields, notes, inactive, updated_by, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+				ON CONFLICT (id) DO UPDATE SET name = $2, country = $3, connector = $4, fields = $5, notes = $6,
+					inactive = $7, updated_by = $8, updated_at = now()
+				RETURNING xmax = 0`, p.ID, p.Name, p.Country, p.Connector, fields, p.Notes, p.Inactive, by).Scan(&inserted)
+			if err != nil {
+				return err
+			}
+			kind := "payer_updated"
+			if inserted {
+				kind = "payer_created"
+				created++
+			}
+			if err := logChange(ctx, tx, p.ID, kind, by, map[string]any{
+				"name": p.Name, "connector": p.Connector, "fields": nonNil(p.Fields), "inactive": p.Inactive}); err != nil {
+				return err
+			}
 		}
-		created = inserted
-		kind := "payer_updated"
-		if inserted {
-			kind = "payer_created"
-		}
-		return logChange(ctx, tx, p.ID, kind, by, map[string]any{
-			"name": p.Name, "connector": p.Connector, "fields": nonNil(p.Fields), "inactive": p.Inactive})
+		return nil
 	})
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	return created, s.RefreshCatalog(ctx)
 }

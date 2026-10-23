@@ -4,12 +4,15 @@ import { useActionState, useState } from "react";
 
 import {
   acceptSuggestions,
+  importPayers,
   loadPayerList,
   saveCodes,
   savePayer,
   type CodesState,
   type FormState,
   type ListState,
+  type PayerImportRow,
+  type PayerImportState,
 } from "@/app/actions";
 import { Field, Messages, Submit } from "@/components/forms";
 import { kindName } from "@/lib/format";
@@ -253,5 +256,83 @@ export function CodesTable({ payer, rows, hasList }: { payer: string; rows: Item
         )}
       </div>
     </form>
+  );
+}
+
+const actionLabel: Record<PayerImportRow["action"], [string, string]> = {
+  add: ["Add", "app-pill--good"],
+  fill: ["Fill setting", "app-pill--good"],
+  same: ["No change", "app-pill--neutral"],
+  conflict: ["Conflict", "app-pill--bad"],
+  skip: ["Skip", "app-pill--wait"],
+};
+
+// ImportPayersForm loads payers exported from Serenity: check the file,
+// read what each row will do, then import it.
+export function ImportPayersForm({ platforms }: { platforms: Record<string, string> }) {
+  const [s, action] = useActionState(importPayers, {} as PayerImportState);
+  const rows = s.rows ?? [];
+  const count = (a: PayerImportRow["action"]) => rows.filter((r) => r.action === a).length;
+  const changes = count("add") + count("fill");
+  return (
+    <div className="app-stack">
+      <form action={action} className="app-inline-form" noValidate>
+        <div className="field field--inline">
+          <label htmlFor="f-upload">Export of Serenity&apos;s payers (CSV or Excel)</label>
+          <input id="f-upload" name="upload" type="file" accept=".csv,.xlsx,text/csv" />
+        </div>
+        <input type="hidden" name="intent" value="check" />
+        <Submit className="app-button">Check the file</Submit>
+      </form>
+      <Messages state={s} />
+      {rows.length > 0 && (
+        <>
+          <p className="app-muted">
+            {count("add")} to add, {count("fill")} to fill, {count("same")} unchanged, {count("conflict")} in conflict,{" "}
+            {count("skip")} skipped.
+          </p>
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th scope="col">Row</th>
+                <th scope="col">Payer</th>
+                <th scope="col">Platform and reference</th>
+                <th scope="col">What happens</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.line}>
+                  <td className="app-tnum">{r.line}</td>
+                  <td>
+                    {r.name}
+                    {r.id && <span className="app-muted app-block">{r.id}</span>}
+                  </td>
+                  <td>
+                    {r.connector ? (platforms[r.connector] ?? r.connector) : <span className="app-dash">–</span>}
+                    {r.fields && Object.keys(r.fields).length > 0 && (
+                      <span className="app-muted app-block">{Object.values(r.fields).join(", ")}</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`app-pill ${actionLabel[r.action][1]}`}>{actionLabel[r.action][0]}</span>
+                    {r.reason && <span className="app-muted app-block">{r.reason}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {s.file && changes > 0 && (
+            <form action={action} className="app-form__foot">
+              <input type="hidden" name="file" value={s.file} />
+              <input type="hidden" name="intent" value="import" />
+              <Submit className="app-button app-button--primary">
+                Import {changes} {changes === 1 ? "change" : "changes"}
+              </Submit>
+            </form>
+          )}
+        </>
+      )}
+    </div>
   );
 }
