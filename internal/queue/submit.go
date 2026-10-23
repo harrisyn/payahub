@@ -52,7 +52,10 @@ func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger
 	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
 	river.AddWorker(ws, &PayoutWorker{Store: st})
 	river.AddWorker(ws, &BillingWorker{Store: st, Logger: logger})
-	cfg := &river.Config{Workers: ws, Logger: logger}
+	// A caller may be waiting on the payer's answer (submit and wait), so a
+	// new job is picked up within a fraction of a second even when the insert
+	// notification is missed.
+	cfg := &river.Config{Workers: ws, Logger: logger, FetchCooldown: 20 * time.Millisecond, FetchPollInterval: 250 * time.Millisecond}
 	if workers > 0 {
 		cfg.Queues = map[string]river.QueueConfig{
 			SubmissionsQueue: {MaxWorkers: workers},

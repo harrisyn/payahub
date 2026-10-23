@@ -76,8 +76,10 @@ each with contract tests against a recorded copy of the platform's API.
 
 - [x] Required fields, unmapped lines, totals
 - [ ] Payer rules as data (allowed items per payer, quantity limits, prices)
-- [ ] Duplicate claim detection
-- [ ] Filing deadline (60 days, LI 1809)
+- [x] Duplicate claim detection: the same patient, payer and visit date; an exact copy waits for a person to confirm
+- [x] Filing deadline (60 days, LI 1809, per payer), warning in the last week; a payer can be set to block late claims
+- [x] Confirming issues that await review, recorded with who and why (`POST /v1/claims/{id}/review`)
+- [ ] Claim page: show the checks, confirm buttons, send button
 
 ## 6. Platform
 
@@ -95,6 +97,8 @@ each with contract tests against a recorded copy of the platform's API.
   `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
 - [ ] Notify operators of a new enquiry by email once outbound email is set up
 - [ ] Team members and roles
+- [x] Real-time answers: create or submit with `Prefer: wait=N` and get the payer's answer in the same response (202 if it takes longer); the async path stays
+- [ ] Remove patient identity before every AI call (name, member number, phone, address, exact birth date)
 - [ ] Webhooks to the clinic's system on every state change
 - [x] Wallets: double-entry ledger; organisation and platform wallets; per-claim charges on acknowledgement and
       monthly fees from the wallet; live claims pause when the wallet does not cover one more

@@ -32,6 +32,9 @@ type Server struct {
 }
 
 func (s *Server) Handler() http.Handler {
+	// Callers that wait for the payer are woken by claim_saved; listen
+	// before the first one arrives.
+	s.Store.ListenForClaims()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.Handle("POST /v1/claims", s.auth(s.createClaim))
@@ -185,6 +188,13 @@ func (s *Server) createClaim(w http.ResponseWriter, r *http.Request) {
 			"This Idempotency-Key was already used with a different request body.", nil)
 	case err != nil:
 		s.internal(w, r, err)
+	case r.URL.Query().Get("submit") == "true":
+		// Create and send in one call; a replay sends nothing twice, as
+		// submitting a claim already on its way is a no-op.
+		if replayed {
+			w.Header().Set("Idempotent-Replayed", "true")
+		}
+		s.submit(w, r, org.ID, c.ID, http.StatusAccepted, c)
 	case replayed:
 		w.Header().Set("Idempotent-Replayed", "true")
 		writeJSON(w, http.StatusOK, c)
@@ -237,23 +247,46 @@ func (s *Server) claimEvents(w http.ResponseWriter, r *http.Request) {
 // submitClaim queues the claim for delivery and answers 202 at once; the
 // outcome arrives on the claim (and, later, by webhook).
 func (s *Server) submitClaim(w http.ResponseWriter, r *http.Request) {
-	c, v, err := queue.Enqueue(r.Context(), s.Store, s.Queue, orgFrom(r.Context()).ID, r.PathValue("id"))
+	s.submit(w, r, orgFrom(r.Context()).ID, r.PathValue("id"), http.StatusAccepted, nil)
+}
+
+// submit queues the claim and answers: at once (status, the claim and its
+// issues), or, when the caller asked to wait, with the payer's answer.
+func (s *Server) submit(w http.ResponseWriter, r *http.Request, orgID, id string, status int, created *claim.Claim) {
+	c, v, err := queue.Enqueue(r.Context(), s.Store, s.Queue, orgID, id)
+	notSent := func(code, msg string, details any) {
+		if created == nil {
+			writeError(w, http.StatusPaymentRequired, code, msg, details)
+			return
+		}
+		// The claim was saved; say so, with why it was not sent.
+		writeJSON(w, http.StatusCreated, map[string]any{"claim": created, "submitted": false,
+			"error": apiError{Code: code, Message: msg, Details: details}})
+	}
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, "claim_not_found", "No claim "+r.PathValue("id")+".", nil)
+		writeError(w, http.StatusNotFound, "claim_not_found", "No claim "+id+".", nil)
 	case errors.Is(err, queue.ErrTrialLimit):
-		writeError(w, http.StatusPaymentRequired, "trial_limit",
-			"Your trial has no live claims left. Choose a plan to keep sending live claims.", nil)
+		notSent("trial_limit", "Your trial has no live claims left. Choose a plan to keep sending live claims.", nil)
 	case errors.Is(err, queue.ErrWalletEmpty):
-		writeError(w, http.StatusPaymentRequired, "wallet_empty",
-			"Your wallet does not cover another live claim. Add funds to keep sending live claims.", nil)
+		notSent("wallet_empty", "Your wallet does not cover another live claim. Add funds to keep sending live claims.", nil)
 	case errors.Is(err, queue.ErrNotSubmittable):
+		if created != nil {
+			created.State = c.State
+			writeJSON(w, http.StatusCreated, map[string]any{"claim": created, "submitted": false,
+				"error": apiError{Code: "not_submittable", Message: "Saved, but not sent: the claim did not pass validation; it is now " + string(c.State) + ".", Details: v.Issues}})
+			return
+		}
 		writeError(w, http.StatusUnprocessableEntity, "not_submittable",
 			"The claim did not pass validation; it is now "+string(c.State)+".", v.Issues)
 	case err != nil:
 		s.internal(w, r, err)
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]any{"claim": c, "issues": v.Issues})
+		if wait := waitFor(r); wait > 0 {
+			s.settle(w, r, c, v.Issues, wait)
+			return
+		}
+		writeJSON(w, status, map[string]any{"claim": c, "issues": v.Issues})
 	}
 }
 

@@ -440,15 +440,28 @@ paths:
                   data: { type: array, items: { $ref: "#/components/schemas/ClaimSummary" } }
                   next_before: { type: string, format: date-time }
     post:
-      summary: Create a claim (validated, not yet sent)
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Create a claim, and optionally send it and wait for the payer
+      description: |
+        Without `submit`, the claim is validated and saved, not sent. With `submit=true` it is
+        also sent in the same call. Add `Prefer: wait=N` (or `?wait=N`, up to 60 seconds) to get
+        the payer's answer in this response: 200 with `outcome` once the payer answers, or 202
+        with a `Location` to poll (or a webhook) if it has not answered within N seconds.
+        A claim that cannot be sent yet is still saved: 201 with `submitted: false` and the error.
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: submit, in: query, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Wait" }
+        - { $ref: "#/components/parameters/Prefer" }
       requestBody:
         required: true
         content:
           application/json: { schema: { $ref: "#/components/schemas/ClaimInput" } }
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Claim" } } } }
-        "200": { description: Replay of an earlier request with the same Idempotency-Key }
+        "200":
+          description: Replay of an earlier request with the same Idempotency-Key, or the payer's answer when waiting
+          content: { application/json: { schema: { $ref: "#/components/schemas/Settled" } } }
+        "202": { $ref: "#/components/responses/StillWaiting" }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
   /v1/claims/extract:
@@ -583,10 +596,66 @@ paths:
         Validates the claim and queues it durably in the same transaction, then answers 202.
         The claim moves to `submitted`, then `acknowledged`, `rejected`, or back to `ready`
         if something a person must fix stopped it. Calling it again while queued is a no-op.
+        With `Prefer: wait=N` (or `?wait=N`, up to 60) the call holds until the payer answers
+        and returns 200 with `outcome`; if N seconds pass first it returns 202 as usual.
+      parameters:
+        - { $ref: "#/components/parameters/ClaimID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/Wait" }
+        - { $ref: "#/components/parameters/Prefer" }
+      responses:
+        "200":
+          description: The payer answered within the wait
+          content: { application/json: { schema: { $ref: "#/components/schemas/Settled" } } }
+        "202": { $ref: "#/components/responses/StillWaiting" }
+        "402": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/{id}/checks:
+    get:
+      summary: Run the edit rules on a saved claim without changing it
+      description: |
+        What stands between the claim and its payer: errors to fix, issues awaiting a person's
+        review (an AI value below its threshold, a possible duplicate, a late filing), and warnings.
       parameters: [{ $ref: "#/components/parameters/ClaimID" }]
       responses:
-        "202": { description: Queued }
-        "402": { $ref: "#/components/responses/Error" }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Validation" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/claims/{id}/review:
+    post:
+      summary: Confirm issues awaiting review
+      description: |
+        Records who confirmed each issue, when, and why. Only review-severity issues can be
+        confirmed; errors are fixed on the claim. A confirmed issue no longer stops the claim.
+      parameters: [{ $ref: "#/components/parameters/ClaimID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [code, field]
+                    properties: { code: { type: string }, field: { type: string } }
+                note: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claim: { $ref: "#/components/schemas/Claim" }
+                  validation: { $ref: "#/components/schemas/Validation" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
   /v1/diagnoses:
     get:
@@ -1240,7 +1309,13 @@ components:
   parameters:
     IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
     ClaimID: { name: id, in: path, required: true, schema: { type: string } }
+    Wait: { name: wait, in: query, schema: { type: integer, minimum: 0, maximum: 60 }, description: Seconds to wait for the payer's answer }
+    Prefer: { name: Prefer, in: header, schema: { type: string, example: "wait=10" }, description: "RFC 7240 wait preference; the same as ?wait" }
   responses:
+    StillWaiting:
+      description: Sent, and the payer has not answered yet. Poll `Location` or wait for the webhook.
+      headers: { Location: { schema: { type: string } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Settled" } } }
     Wallet:
       type: object
       properties:
@@ -1466,6 +1541,23 @@ components:
             total: { type: integer, description: Minor units }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
+    Settled:
+      type: object
+      properties:
+        claim: { $ref: "#/components/schemas/Claim" }
+        issues: { type: array, items: { $ref: "#/components/schemas/Issue" } }
+        outcome:
+          nullable: true
+          description: Null while the payer has not answered
+          type: object
+          properties:
+            state: { type: string, description: "acknowledged, rejected, ready (a person must fix something), or another claim state" }
+            final: { type: boolean, description: True when the payer has given its answer }
+            payer_claim_number: { type: string }
+            message: { type: string }
+            error:
+              type: object
+              properties: { code: { type: string }, message: { type: string }, payer_message: { type: string } }
     Validation:
       type: object
       properties:
@@ -1475,15 +1567,14 @@ components:
           properties:
             line_mode: { enum: [realtime, bulk] }
             timing: { enum: [early, deferred] }
-        issues:
-          type: array
-          items:
-            type: object
-            properties:
-              code: { type: string }
-              severity: { enum: [error, warning, review] }
-              field: { type: string }
-              message: { type: string }
+        issues: { type: array, items: { $ref: "#/components/schemas/Issue" } }
+    Issue:
+      type: object
+      properties:
+        code: { type: string }
+        severity: { enum: [error, warning, review] }
+        field: { type: string }
+        message: { type: string }
     Payer:
       type: object
       properties:

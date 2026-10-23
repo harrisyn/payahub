@@ -48,6 +48,9 @@ type Store struct {
 	// built from; -1 before the first load.
 	catalogVersion atomic.Int64
 	catalogMu      sync.Mutex
+
+	// wait passes claim_saved notifications to requests waiting on a claim.
+	wait waiters
 }
 
 const keyTTL = 30 * time.Second
@@ -277,6 +280,10 @@ func SaveClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim, from claim.State,
 		                  submission_queued = $6, updated_at = $7
 		WHERE id = $1`, c.ID, c.State, c.PayerClaimNumber, c.Total, body, queued, c.UpdatedAt)
 	if err != nil {
+		return err
+	}
+	// Delivered on commit, to requests waiting for this claim to settle.
+	if _, err := tx.Exec(ctx, `SELECT pg_notify('`+claimSavedChannel+`', $1)`, c.ID); err != nil {
 		return err
 	}
 	if c.Environment == "live" && c.State.Billable() && !from.Billable() {
