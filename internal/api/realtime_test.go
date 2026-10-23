@@ -48,7 +48,7 @@ func TestSubmitAndWaitForThePayer(t *testing.T) {
 	t.Logf("a saved claim answered in %s", time.Since(start).Round(time.Millisecond))
 
 	// A payer slower than the wait: 202, and the claim still arrives.
-	s, out = e.do(t, "POST", "/v1/claims?submit=true&wait=1", claimBody("FLAKY-RT"))
+	s, out = e.do(t, "POST", "/v1/claims?submit=true&wait=1", claimBody("SLOW-RT"))
 	if s != 202 || out["outcome"] != nil {
 		t.Fatalf("slow payer: %d %v", s, out)
 	}

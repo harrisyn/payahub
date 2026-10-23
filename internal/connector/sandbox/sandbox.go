@@ -10,6 +10,7 @@
 //	REJECT...     the payer refuses the claim
 //	FLAKY...      the first send times out before reaching the payer
 //	LOSTREPLY...  the first send reaches the payer but the reply is lost
+//	SLOW...       the payer takes SlowFor to answer, then acknowledges
 //	anything else eligible; claim acknowledged
 package sandbox
 
@@ -22,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/connector"
@@ -121,8 +123,14 @@ func (Sandbox) VerifyMember(_ context.Context, memberNumber, otp string) (connec
 	}, nil
 }
 
+// SlowFor is how long a SLOW member's payer takes to answer.
+const SlowFor = 3 * time.Second
+
 // send applies the scripted failure paths, then runs accept under the payer lock.
 func send(c *claim.Claim, accept func() connector.Receipt) (connector.Receipt, error) {
+	if has(c, "SLOW") {
+		time.Sleep(SlowFor)
+	}
 	payer.Lock()
 	defer payer.Unlock()
 	payer.attempts[c.ID]++
