@@ -27,7 +27,7 @@ func (StatusSweepArgs) Kind() string { return "status_sweep" }
 func (StatusSweepArgs) InsertOpts() river.InsertOpts {
 	// Only the elected leader inserts periodic jobs, so no uniqueness is
 	// needed; overlapping sweeps would take different claims anyway.
-	return river.InsertOpts{Queue: SubmissionsQueue, MaxAttempts: 1}
+	return river.InsertOpts{Queue: FollowUpQueue, MaxAttempts: 1}
 }
 
 type StatusSweepWorker struct {
@@ -77,7 +77,7 @@ func (StatusArgs) Kind() string { return "claim_status" }
 
 // One try: the claim's next check is already scheduled.
 func (StatusArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: SubmissionsQueue, MaxAttempts: 1}
+	return river.InsertOpts{Queue: FollowUpQueue, MaxAttempts: 1}
 }
 
 // CheckStatusNow queues a status check for a claim the payer has, for a

@@ -471,7 +471,10 @@ export async function acceptSuggestions(
     `/v1/operator/payers/${encodeURIComponent(payer)}/codes/accept`,
     {
       method: "POST",
-      body: { min_confidence: Number(text(form, "min_confidence")) || 0.9 },
+      body: {
+        min_confidence: Number(text(form, "min_confidence")) || 0.9,
+        source: text(form, "source") || "words",
+      },
     },
   );
   if (!res.ok) return { error: res.error.message };
@@ -481,6 +484,27 @@ export async function acceptSuggestions(
         ok: `${res.data.applied} ${res.data.applied === 1 ? "match" : "matches"} accepted.`,
       }
     : { error: "No match was sure enough. Map the rest by hand." };
+}
+
+// askModelForCodes has the code-matching model look for the payer's code of
+// every item without one, from the payer's list. The picks wait on the page
+// for an operator to use or accept.
+export async function askModelForCodes(
+  _: FormState,
+  form: FormData,
+): Promise<FormState> {
+  const payer = text(form, "payer");
+  const res = await api<{ asked: number; answered: number; found: number }>(
+    `/v1/operator/payers/${encodeURIComponent(payer)}/codes/model`,
+    { method: "POST", body: {} },
+  );
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console/operator", "layout");
+  const { asked, answered, found } = res.data;
+  if (!asked) return { ok: "Every item already has a code." };
+  return {
+    ok: `The model looked at ${answered} of ${asked} items and found a code in the list for ${found}. Its picks are marked “model” below.`,
+  };
 }
 
 export type ListState = FormState & {

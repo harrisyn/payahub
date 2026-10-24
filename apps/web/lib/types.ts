@@ -232,6 +232,25 @@ export type ItemCode = {
   in_list?: boolean;
   generated?: boolean;
   suggestions: (ListEntry & { confidence: number })[];
+  model_pick?: CodePick;
+};
+
+export type CodePick = {
+  item_id: string;
+  code: string;
+  name: string;
+  confidence: number;
+  reason: string;
+  model: string;
+  prompt_version: string;
+  created_at: string;
+};
+
+export type DiagnosisSuggestion = {
+  code: Diagnosis;
+  confidence: number;
+  source: "words" | "model";
+  reason?: string;
 };
 
 export type PayerCodes = {

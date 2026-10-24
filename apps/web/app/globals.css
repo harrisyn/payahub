@@ -602,3 +602,6 @@ label.app-issue input { margin-top: 4px; }
   .app-held { grid-template-columns: 1fr; gap: 8px; }
 }
 .app-caption { caption-side: top; text-align: left; font-weight: 600; padding: 16px 0 4px; }
+.app-sug--model { border-style: solid; border-color: #C9C2F0; }
+.app-sug--model .app-tag { margin-left: 0; }
+.app-coded { padding: 12px 0; border-bottom: 1px solid var(--rule); display: grid; gap: 4px; }

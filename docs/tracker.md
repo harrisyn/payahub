@@ -62,7 +62,10 @@ each with contract tests against a recorded copy of the platform's API.
       reason, model, prompt version and hash
 - [x] Every model call recorded (task, model, prompt version and hash, input hash, tokens, time, outcome);
       30-day use per task and model on the AI models page
-- [ ] Model-backed standard item → payer code, and diagnosis text → ICD-10 beyond the word search
+- [x] Model-backed standard item → payer code (operators: Ask the model on a payer's codes; the model picks only
+      from the payer's own list, a pick of another strength or form is never sure, picks wait to be accepted) and
+      diagnosis text → ICD-10 (`POST /v1/diagnoses/suggest`, Code with the model under Services and medicines, and
+      a form's diagnosis written without a code; only codes in the list, words scrubbed first)
 - [x] Review queue (Claims, To review; `GET /v1/review-queue`): own codes holding unsent claims back, mapped once to
       recheck every claim waiting on them; model picks under the threshold and possible copies, confirmed with a note
 - [x] Regression checks: 63 clinic names with known answers (15 groups that differ only in strength or form

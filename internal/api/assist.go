@@ -157,6 +157,13 @@ func (s *Server) extractClaim(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	// Diagnoses the form gave only in words are coded by the code-matching
+	// model, when one is set up; the title search stands otherwise.
+	if mt, err := s.Store.AIRouter(ctx, s.Vault, ai.TaskCodeMatching); err == nil && len(mt.Providers) > 0 {
+		if runs := assist.CodeDiagnoses(ctx, mt, &x, engine.Thresholds[claim.OriginAIMapped]); len(runs) > 0 {
+			s.recordRuns(r.Context(), org.ID, runs)
+		}
+	}
 	out := struct {
 		assist.Extraction
 		RedactedPages []string `json:"redacted_pages,omitempty"`

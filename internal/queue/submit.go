@@ -29,8 +29,11 @@ import (
 
 const (
 	SubmissionsQueue = "submissions"
-	maxAttempts      = 20
-	payerTimeout     = 60 * time.Second
+	// FollowUpQueue asks payers about claims already sent. It has workers of
+	// its own, so following many claims never holds a new claim back.
+	FollowUpQueue = "follow_ups"
+	maxAttempts   = 20
+	payerTimeout  = 60 * time.Second
 )
 
 type SubmitArgs struct {
@@ -67,6 +70,7 @@ func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger
 	if workers > 0 {
 		cfg.Queues = map[string]river.QueueConfig{
 			SubmissionsQueue: {MaxWorkers: workers},
+			FollowUpQueue:    {MaxWorkers: max(workers/4, 4)},
 			MoneyQueue:       {MaxWorkers: 10},
 			MailQueue:        {MaxWorkers: 5},
 		}

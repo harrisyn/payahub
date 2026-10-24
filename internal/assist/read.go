@@ -83,6 +83,8 @@ type Extraction struct {
 	// and Pages are the blacked-out pages it saw (PNG).
 	Privacy deid.Report `json:"privacy"`
 	Pages   [][]byte    `json:"-"`
+	// uncoded are the diagnoses the form gave no valid code for.
+	uncoded []int
 }
 
 // Document is a file to read.
@@ -208,7 +210,9 @@ func ReadClaimForm(ctx context.Context, c Completer, ocr deid.OCR, doc Document,
 			dg.Role, primary = claim.Primary, true
 		}
 		path := fmt.Sprintf("diagnoses.%d.code", i)
-		if code, st := icd10.Check(d.ICD10.Value); st == icd10.Listed || st == icd10.Category {
+		code, st := icd10.Check(d.ICD10.Value)
+		coded := st == icd10.Listed || st == icd10.Category
+		if coded {
 			dg.Code.Value, dg.Code.Display = put(path, d.ICD10, code.Code, ""), code.Title
 		} else if hits := icd10.Search(desc, 1); desc != "" && len(hits) == 1 {
 			// Found by its words: a suggestion for a person, never trusted.
@@ -223,6 +227,9 @@ func ReadClaimForm(ctx context.Context, c Completer, ocr deid.OCR, doc Document,
 		}
 		if dg.Code.Value == "" && desc == "" {
 			continue
+		}
+		if !coded && desc != "" {
+			x.uncoded = append(x.uncoded, i)
 		}
 		in.Diagnoses = append(in.Diagnoses, dg)
 	}

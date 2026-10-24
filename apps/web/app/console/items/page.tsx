@@ -5,7 +5,13 @@ import { MappingForm, Submit } from "@/components/forms";
 import { api } from "@/lib/api";
 import { kindName } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
-import type { Diagnosis, Item, ItemKind, ItemMapping } from "@/lib/types";
+import type {
+  Diagnosis,
+  DiagnosisSuggestion,
+  Item,
+  ItemKind,
+  ItemMapping,
+} from "@/lib/types";
 import { Select, TextInput } from "@/components/ui";
 
 export const metadata = { title: "Services and medicines" };
@@ -22,14 +28,19 @@ const kinds: ItemKind[] = [
 export default async function Items({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; q?: string; dq?: string }>;
+  searchParams: Promise<{
+    kind?: string;
+    q?: string;
+    dq?: string;
+    ask?: string;
+  }>;
 }) {
   await requireOrg();
-  const { kind = "", q = "", dq = "" } = await searchParams;
+  const { kind = "", q = "", dq = "", ask = "" } = await searchParams;
   const query = new URLSearchParams();
   if (kinds.includes(kind as ItemKind)) query.set("kind", kind);
   if (q.trim()) query.set("q", q.trim());
-  const [mappings, items, catalogue, diagnoses] = await Promise.all([
+  const [mappings, items, catalogue, diagnoses, coded] = await Promise.all([
     api<{ data: ItemMapping[] }>("/v1/item-mappings"),
     api<{ data: Item[] }>("/v1/items"),
     api<{ data: Item[] }>(`/v1/items?${query}`),
@@ -38,7 +49,22 @@ export default async function Items({
           `/v1/diagnoses?limit=50&q=${encodeURIComponent(dq.trim())}`,
         )
       : Promise.resolve(null),
+    // Coding the words with the model, when the person asks for it.
+    dq.trim() && ask
+      ? api<{
+          data: { text: string; suggestions: DiagnosisSuggestion[] }[];
+          method: "words" | "model";
+          note?: string;
+        }>("/v1/diagnoses/suggest", {
+          method: "POST",
+          body: { diagnoses: [{ text: dq.trim().slice(0, 300) }] },
+        })
+      : Promise.resolve(null),
   ]);
+  const codedRow = coded?.ok ? coded.data : null;
+  const modelPick = codedRow?.data[0]?.suggestions.find(
+    (x) => x.source === "model",
+  );
   const found = diagnoses?.ok ? diagnoses.data.data : [];
   const mine = mappings.ok ? mappings.data.data : [];
   const byId = new Map(
@@ -208,8 +234,41 @@ export default async function Items({
             <button type="submit" className="app-button">
               Find
             </button>
+            <button type="submit" name="ask" value="1" className="app-button">
+              Code with the model
+            </button>
           </form>
         </div>
+        {coded && (
+          <div className="app-coded" role="status">
+            {modelPick ? (
+              <>
+                <span>
+                  The model reads “{dq.trim()}” as{" "}
+                  <span className="app-id">{modelPick.code.code}</span>{" "}
+                  {modelPick.code.title}{" "}
+                  <span className="app-muted">
+                    ({Math.round(modelPick.confidence * 100)}%)
+                  </span>
+                </span>
+                {modelPick.reason && (
+                  <span className="app-muted">{modelPick.reason}</span>
+                )}
+              </>
+            ) : codedRow?.method === "model" ? (
+              <span>
+                The model could not code “{dq.trim()}”. Try other words.
+              </span>
+            ) : !coded.ok ? (
+              <span className="app-muted">{coded.error.message}</span>
+            ) : (
+              <span className="app-muted">
+                {codedRow?.note ??
+                  "No model is set up for coding yet, so only the title search below is used."}
+              </span>
+            )}
+          </div>
+        )}
         {dq.trim() ? (
           found.length ? (
             <table className="app-table">

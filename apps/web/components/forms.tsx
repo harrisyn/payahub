@@ -37,19 +37,23 @@ import type {
 export function Submit({
   children,
   className = "button",
+  pending: busyText = "Working…",
+  disabled = false,
 }: {
   children: React.ReactNode;
   className?: string;
+  pending?: string;
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       className={className}
-      disabled={pending}
+      disabled={pending || disabled}
       aria-busy={pending}
     >
-      {pending ? "Working…" : children}
+      {pending ? busyText : children}
     </button>
   );
 }

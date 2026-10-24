@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import {
   AcceptForm,
   CodesTable,
+  ModelCodesForm,
   ListForm,
   PayerForm,
   RulesForm,
@@ -103,6 +104,10 @@ export default async function OperatorPayer({
   );
   const hasList = codes.data.list_size > 0;
   const waiting = all.filter(sure).length;
+  const modelSure = all.filter(
+    (r) => !r.code && !!r.model_pick?.code && r.model_pick.confidence >= 0.9,
+  ).length;
+  const uncoded = all.filter((r) => !r.code).length;
   const notInList = all.filter((r) => r.in_list === false).length;
   const rows = all.filter(
     (r) =>
@@ -176,7 +181,15 @@ export default async function OperatorPayer({
                   : `Type ${p.name}'s code for each item, or load its list first to get matches.`}
             </p>
           </div>
-          {hasList && <AcceptForm payer={p.id} waiting={waiting} />}
+          {hasList && !generated && (
+            <div className="app-actions">
+              <ModelCodesForm payer={p.id} missing={uncoded} />
+              {modelSure > 0 && (
+                <AcceptForm payer={p.id} waiting={modelSure} source="model" />
+              )}
+              <AcceptForm payer={p.id} waiting={waiting} />
+            </div>
+          )}
         </div>
         <nav className="app-tabs" aria-label="Kind">
           <Link href={q("", show)} aria-current={!kind ? "page" : undefined}>

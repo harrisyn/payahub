@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 
 import {
   acceptSuggestions,
+  askModelForCodes,
   importPayers,
   loadPayerList,
   saveCodes,
@@ -234,22 +235,56 @@ export function RulesForm({
 export function AcceptForm({
   payer,
   waiting,
+  source = "words",
 }: {
   payer: string;
   waiting: number;
+  source?: "words" | "model";
 }) {
   const [s, action] = useActionState(acceptSuggestions, {} as FormState);
+  const what = source === "model" ? "model pick" : "match";
   return (
     <form action={action} className="app-inline-form">
       <input type="hidden" name="payer" value={payer} />
+      <input type="hidden" name="source" value={source} />
       <input type="hidden" name="min_confidence" value="0.9" />
       {waiting > 0 ? (
         <Submit className="app-button">
-          Accept {waiting} sure {waiting === 1 ? "match" : "matches"}
+          Accept {waiting} sure{" "}
+          {waiting === 1
+            ? what
+            : source === "model"
+              ? "model picks"
+              : "matches"}
         </Submit>
-      ) : (
+      ) : source === "words" ? (
         <span className="app-muted">No sure matches left to accept.</span>
-      )}
+      ) : null}
+      <Messages state={s} />
+    </form>
+  );
+}
+
+// ModelCodesForm asks the code-matching model for the payer's code of every
+// item without one. It can take a few minutes on a long list.
+export function ModelCodesForm({
+  payer,
+  missing,
+}: {
+  payer: string;
+  missing: number;
+}) {
+  const [s, action] = useActionState(askModelForCodes, {} as FormState);
+  return (
+    <form action={action} className="app-inline-form">
+      <input type="hidden" name="payer" value={payer} />
+      <Submit
+        className="app-button"
+        pending="The model is reading the list…"
+        disabled={!missing}
+      >
+        Ask the model ({missing} without a code)
+      </Submit>
       <Messages state={s} />
     </form>
   );
@@ -338,23 +373,52 @@ export function CodesTable({
                         </span>
                       )}
                     </>
-                  ) : r.suggestions.length ? (
+                  ) : r.suggestions.length || r.model_pick ? (
                     <span className="app-sugs">
-                      {r.suggestions.map((g) => (
-                        <button
-                          type="button"
-                          key={g.code}
-                          className="app-sug"
-                          aria-pressed={v === g.code}
-                          onClick={() => setValues({ ...values, [id]: g.code })}
-                          title={`Use ${g.code}`}
-                        >
-                          <span className="app-id">{g.code}</span> {g.name}
-                          <span className="app-sug__conf">
-                            {pct(g.confidence)}
+                      {r.model_pick &&
+                        (r.model_pick.code ? (
+                          <button
+                            type="button"
+                            className="app-sug app-sug--model"
+                            aria-pressed={v === r.model_pick.code}
+                            onClick={() =>
+                              setValues({ ...values, [id]: r.model_pick!.code })
+                            }
+                            title={`${r.model_pick.model}: ${r.model_pick.reason}`}
+                          >
+                            <span className="app-tag">model</span>
+                            <span className="app-id">
+                              {r.model_pick.code}
+                            </span>{" "}
+                            {r.model_pick.name}
+                            <span className="app-sug__conf">
+                              {pct(r.model_pick.confidence)}
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="app-muted app-block">
+                            The model found no code for this in the list.
                           </span>
-                        </button>
-                      ))}
+                        ))}
+                      {r.suggestions
+                        .filter((g) => g.code !== r.model_pick?.code)
+                        .map((g) => (
+                          <button
+                            type="button"
+                            key={g.code}
+                            className="app-sug"
+                            aria-pressed={v === g.code}
+                            onClick={() =>
+                              setValues({ ...values, [id]: g.code })
+                            }
+                            title={`Use ${g.code}`}
+                          >
+                            <span className="app-id">{g.code}</span> {g.name}
+                            <span className="app-sug__conf">
+                              {pct(g.confidence)}
+                            </span>
+                          </button>
+                        ))}
                     </span>
                   ) : (
                     <span className="app-muted">

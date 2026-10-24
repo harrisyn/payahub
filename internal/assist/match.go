@@ -145,6 +145,12 @@ func matchBatchOf(ctx context.Context, c Completer, cat string, batch []Own) (ma
 				continue // an invented id or the wrong kind: no pick at all
 			}
 			p.Item, p.Found = it, true
+			if ok, why := catalog.Fits(it.ID, o.Name); !ok {
+				p.Confidence = min(p.Confidence, 0.5)
+				p.Reason = strings.TrimSpace(p.Reason + " (the clinic's name gives " + why + ")")
+				p.Evidence.Confidence = &p.Confidence
+				p.Evidence.Assertion = p.Reason
+			}
 		}
 		picks[m.Code] = p
 	}

@@ -1,15 +1,20 @@
 package api
 
 import (
+	"context"
 	"errors"
-	"github.com/harrisyn/payahub/internal/assist"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/harrisyn/payahub/internal/ai"
+	"github.com/harrisyn/payahub/internal/assist"
 	"github.com/harrisyn/payahub/internal/catalog"
+	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/connector"
+	"github.com/harrisyn/payahub/internal/deid"
 	"github.com/harrisyn/payahub/internal/icd10"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
@@ -25,6 +30,7 @@ func (s *Server) catalogRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/items/{id}", s.getItem)
 	mux.Handle("POST /v1/items/suggest", s.auth(s.suggestItems))
 	mux.HandleFunc("GET /v1/diagnoses", s.searchDiagnoses)
+	mux.Handle("POST /v1/diagnoses/suggest", s.auth(s.suggestDiagnoses))
 	mux.Handle("GET /v1/item-mappings", s.auth(s.listItemMappings))
 	mux.Handle("PUT /v1/item-mappings", s.auth(s.putItemMappings))
 	mux.Handle("DELETE /v1/item-mappings/{code}", s.auth(s.deleteItemMapping))
@@ -282,4 +288,103 @@ func (s *Server) searchDiagnoses(w http.ResponseWriter, r *http.Request) {
 		limit = 20
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": icd10.Search(r.URL.Query().Get("q"), limit)})
+}
+
+// diagnosisSuggestion is an ICD-10 code proposed for a diagnosis in words.
+type diagnosisSuggestion struct {
+	Code       icd10.Code      `json:"code"`
+	Confidence float64         `json:"confidence"`
+	Source     string          `json:"source"` // words | model
+	Reason     string          `json:"reason,omitempty"`
+	Evidence   *claim.Evidence `json:"evidence,omitempty"`
+}
+
+// suggestDiagnoses proposes ICD-10 codes for diagnoses in a clinician's
+// words: the code-matching model first, when one is set up, then the title
+// search. The words are scrubbed of anything identifying before a model sees
+// them. Nothing is saved; a person (or the caller's system) chooses.
+func (s *Server) suggestDiagnoses(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Diagnoses []struct {
+			Text string `json:"text"`
+		} `json:"diagnoses"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Diagnoses) == 0 || len(in.Diagnoses) > 100 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_diagnoses", "Send between 1 and 100 diagnoses.", nil)
+		return
+	}
+	texts := make([]assist.DiagnosisText, 0, len(in.Diagnoses))
+	for i, d := range in.Diagnoses {
+		t := strings.TrimSpace(d.Text)
+		if t == "" || len(t) > 300 {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_diagnoses", "Each diagnosis needs its words, up to 300 characters.",
+				map[string]string{fmt.Sprintf("diagnoses[%d].text", i): "Between 1 and 300 characters."})
+			return
+		}
+		texts = append(texts, assist.DiagnosisText{Key: strconv.Itoa(i), Text: t})
+	}
+	method, note := "words", ""
+	var picks map[string]assist.DiagnosisPick
+	if r.URL.Query().Get("method") != "words" {
+		rt, err := s.Store.AIRouter(r.Context(), s.Vault, ai.TaskCodeMatching)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if len(rt.Providers) > 0 {
+			extendWrite(w, 2*time.Minute+10*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+			defer cancel()
+			var runs []assist.Run
+			picks, runs = assist.MatchDiagnoses(ctx, rt, texts, deid.Identity{})
+			s.recordRuns(ctx, orgFrom(r.Context()).ID, runs)
+			if len(picks) > 0 {
+				method = "model"
+			} else {
+				for _, run := range runs {
+					if run.Err != nil {
+						s.Logger.WarnContext(r.Context(), "model diagnosis coding failed; using the title search", "err", run.Err)
+						note = "The model could not answer, so these are title matches only."
+						break
+					}
+				}
+			}
+		}
+	}
+	type result struct {
+		Text        string                `json:"text"`
+		Suggestions []diagnosisSuggestion `json:"suggestions"`
+	}
+	out := make([]result, 0, len(texts))
+	for _, t := range texts {
+		res := result{Text: t.Text, Suggestions: []diagnosisSuggestion{}}
+		p, picked := picks[t.Key]
+		if picked && p.Found {
+			ev := p.Evidence
+			res.Suggestions = append(res.Suggestions, diagnosisSuggestion{Code: p.Code, Confidence: p.Confidence, Source: "model", Reason: p.Reason, Evidence: &ev})
+		}
+		for _, h := range icd10.Search(t.Text, 3) {
+			if len(res.Suggestions) == 3 {
+				break
+			}
+			if picked && p.Found && h.Code == p.Code.Code {
+				continue
+			}
+			// A title that holds every word is a fair guess, never a sure one.
+			conf := 0.5
+			if picked && !p.Found {
+				conf = 0.3
+			}
+			res.Suggestions = append(res.Suggestions, diagnosisSuggestion{Code: h, Confidence: conf, Source: "words"})
+		}
+		out = append(out, res)
+	}
+	resp := map[string]any{"data": out, "method": method}
+	if note != "" {
+		resp["note"] = note
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

@@ -334,3 +334,22 @@ func SuggestPayerCodes(payerID, itemID string, limit int) []CodeSuggestion {
 	}
 	return out
 }
+
+// Fits checks a name against a standard item the way word matching does:
+// the strengths it names must be the item's, and the form it names must be
+// of the item's form family. It says what differs when it does not fit.
+func Fits(itemID, name string) (bool, string) {
+	it, ok := get().byItem[itemID]
+	if !ok {
+		return false, "no such item"
+	}
+	x := indexItem(it)
+	t := tokens(name)
+	if !sameStrength(numbers(t), x.numbers) {
+		return false, "a different strength"
+	}
+	if !sameForm(formsOf(t), x.forms) {
+		return false, "a different form"
+	}
+	return true, ""
+}

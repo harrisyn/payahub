@@ -133,6 +133,12 @@ func TestThroughput(t *testing.T) {
 		t.Errorf("%d of %d real-time requests had the payer's answer", answered.Load(), want)
 	}
 
+	// These claims are not followed up afterwards: the shared test database
+	// would otherwise ask the sandbox about them for the next 120 days.
+	t.Cleanup(func() {
+		_, _ = st.Pool.Exec(context.Background(), `UPDATE claims SET status_check_at = NULL WHERE id = ANY($1)`, ids)
+	})
+
 	rate := func(d time.Duration) float64 { return float64(n) / d.Seconds() }
 	t.Logf("%d claims, 3 lines each, 100 at a time", n)
 	t.Logf("accepted in %v (%.0f/s); acknowledged by the payer in %v (%.0f/s); %d webhooks heard in %v",

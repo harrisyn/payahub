@@ -986,6 +986,57 @@ paths:
                         delivered_at: { type: string, format: date-time }
                         payload: { $ref: "#/components/schemas/WebhookEvent" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/diagnoses/suggest:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Propose ICD-10 codes for diagnoses written in words ("URTI", "BP", "malaria")
+      description: |
+        The code-matching model, when one is set up, codes each diagnosis first; the title search fills
+        in and stands in when no model answers (`method` says which). The model may only give a code in
+        the ICD-10 list. The words are scrubbed of anything identifying before a model sees them. Nothing
+        is saved. Model suggestions carry their evidence (model, prompt version and hash).
+      parameters:
+        - { name: method, in: query, schema: { type: string, enum: [words] }, description: "words: skip the model" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [diagnoses]
+              properties:
+                diagnoses:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: object, required: [text], properties: { text: { type: string, maxLength: 300 } } }
+      responses:
+        "200":
+          description: Up to three suggestions per diagnosis, the model's first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  method: { type: string, enum: [model, words] }
+                  note: { type: string }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text: { type: string }
+                        suggestions:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              code: { type: object, properties: { code: { type: string }, title: { type: string }, billable: { type: boolean } } }
+                              confidence: { type: number }
+                              source: { type: string, enum: [model, words] }
+                              reason: { type: string }
+                              evidence: { $ref: "#/components/schemas/Evidence" }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/diagnoses:
     get:
       summary: Find ICD-10 codes by the start of a code ("B50") or by words ("falciparum malaria")
@@ -1529,14 +1580,55 @@ paths:
     post:
       security: [{ session: [] }]
       summary: Take the best match from the payer's list for every item without a code, where it is sure enough
-      description: A match is taken when its confidence is at least `min_confidence` (0.9 by default) and 0.1 ahead of the next.
+      description: |
+        With `source: words` (the default) a word match is taken when its confidence is at least
+        `min_confidence` (0.9 by default) and 0.1 ahead of the next. With `source: model` the model's
+        kept pick is taken when its confidence is at least `min_confidence` and its code is still in
+        the payer's list.
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
         content:
           application/json:
-            schema: { type: object, properties: { min_confidence: { type: number, minimum: 0.5, maximum: 1 } } }
+            schema:
+              type: object
+              properties:
+                min_confidence: { type: number, minimum: 0.5, maximum: 1 }
+                source: { type: string, enum: [words, model], default: words }
       responses:
         "200": { $ref: "#/components/responses/CodesApplied" }
+  /v1/operator/payers/{id}/codes/model:
+    post:
+      security: [{ session: [] }]
+      summary: Ask the code-matching model for the payer's code of each standard item, from the payer's own list (operators only)
+      description: |
+        Without `item_ids`, every item with no code (of `kind`, when given) is asked about. The model
+        may only choose a code in the payer's list; for a list of more than 1,500 codes, only among each
+        item's 15 closest entries by word matching. A pick whose list entry names a different strength
+        or form than the item is capped at 0.5. Picks are kept, shown on GET .../codes as `model_pick`,
+        and become the payer's code only when an operator saves or accepts them. May take a few minutes.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                item_ids: { type: array, maxItems: 1000, items: { type: string } }
+                kind: { type: string }
+      responses:
+        "200":
+          description: The picks just made (code empty where the model found none)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asked: { type: integer }
+                  answered: { type: integer }
+                  found: { type: integer }
+                  data: { type: array, items: { $ref: "#/components/schemas/CodePick" } }
+        "409": { description: "no_list (load the payer's list first) or no_model", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { $ref: "#/components/responses/Error" }
   /v1/operator/payers/{id}/list:
     put:
       security: [{ session: [] }]
@@ -1772,6 +1864,17 @@ components:
         bank_name: { type: string }
         account_number: { type: string }
         currency: { type: string }
+    CodePick:
+      type: object
+      properties:
+        item_id: { type: string }
+        code: { type: string, description: Empty when the model found no code in the list }
+        name: { type: string }
+        confidence: { type: number }
+        reason: { type: string }
+        model: { type: string }
+        prompt_version: { type: string }
+        created_at: { type: string, format: date-time }
     AICheckRun:
       type: object
       properties:
