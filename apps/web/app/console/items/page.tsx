@@ -6,12 +6,24 @@ import { api } from "@/lib/api";
 import { kindName } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 import type { Diagnosis, Item, ItemKind, ItemMapping } from "@/lib/types";
+import { Select, TextInput } from "@/components/ui";
 
 export const metadata = { title: "Services and medicines" };
 
-const kinds: ItemKind[] = ["service", "lab", "imaging", "procedure", "medication", "consumable"];
+const kinds: ItemKind[] = [
+  "service",
+  "lab",
+  "imaging",
+  "procedure",
+  "medication",
+  "consumable",
+];
 
-export default async function Items({ searchParams }: { searchParams: Promise<{ kind?: string; q?: string; dq?: string }> }) {
+export default async function Items({
+  searchParams,
+}: {
+  searchParams: Promise<{ kind?: string; q?: string; dq?: string }>;
+}) {
   await requireOrg();
   const { kind = "", q = "", dq = "" } = await searchParams;
   const query = new URLSearchParams();
@@ -22,12 +34,16 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
     api<{ data: Item[] }>("/v1/items"),
     api<{ data: Item[] }>(`/v1/items?${query}`),
     dq.trim()
-      ? api<{ data: Diagnosis[] }>(`/v1/diagnoses?limit=50&q=${encodeURIComponent(dq.trim())}`)
+      ? api<{ data: Diagnosis[] }>(
+          `/v1/diagnoses?limit=50&q=${encodeURIComponent(dq.trim())}`,
+        )
       : Promise.resolve(null),
   ]);
   const found = diagnoses?.ok ? diagnoses.data.data : [];
   const mine = mappings.ok ? mappings.data.data : [];
-  const byId = new Map((items.ok ? items.data.data : []).map((it) => [it.id, it]));
+  const byId = new Map(
+    (items.ok ? items.data.data : []).map((it) => [it.id, it]),
+  );
   const shown = catalogue.ok ? catalogue.data.data : [];
 
   return (
@@ -48,7 +64,8 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
           Map your codes
         </h2>
         <p className="app-muted">
-          Paste from your price list or pharmacy system. We suggest the standard item for each line; you confirm.
+          Paste from your price list or pharmacy system. We suggest the standard
+          item for each line; you confirm.
         </p>
         <MappingForm />
       </section>
@@ -79,7 +96,9 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
                 return (
                   <tr key={m.local_code}>
                     <td className="app-id">{m.local_code}</td>
-                    <td className="hide-sm">{m.local_name || <span className="app-dash">–</span>}</td>
+                    <td className="hide-sm">
+                      {m.local_name || <span className="app-dash">–</span>}
+                    </td>
                     <td>
                       {it ? it.name : m.item_id}
                       <span className="app-muted app-block">
@@ -98,7 +117,9 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
             </tbody>
           </table>
         ) : (
-          <p className="app-muted app-pad">Nothing mapped yet. Claims can still send standard codes directly.</p>
+          <p className="app-muted app-pad">
+            Nothing mapped yet. Claims can still send standard codes directly.
+          </p>
         )}
       </section>
 
@@ -108,21 +129,24 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
             The standard list
           </h2>
           <form className="app-inline-form" role="search">
-            <div className="field field--inline">
-              <label htmlFor="f-q">Search</label>
-              <input id="f-q" name="q" defaultValue={q} placeholder="paracetamol, FBC…" />
-            </div>
-            <div className="field field--inline">
-              <label htmlFor="f-kind">Kind</label>
-              <select id="f-kind" name="kind" defaultValue={kind}>
-                <option value="">All</option>
-                {kinds.map((k) => (
-                  <option key={k} value={k}>
-                    {kindName[k]}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <TextInput
+              id="f-q"
+              name="q"
+              label="Search"
+              defaultValue={q}
+              placeholder="paracetamol, FBC…"
+            />
+            <Select
+              id="f-kind"
+              name="kind"
+              label="Kind"
+              defaultValue={kind}
+              data={[
+                { value: "", label: "All" },
+                ...kinds.map((k) => ({ value: k, label: kindName[k] })),
+              ]}
+              className="app-inline-form__env"
+            />
             <button type="submit" className="app-button">
               Show
             </button>
@@ -148,13 +172,17 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
                 <td>{it.name}</td>
                 <td className="hide-sm">{kindName[it.kind]}</td>
                 <td className="app-muted hide-sm">
-                  {it.codes?.map((c) => `${c.system.toUpperCase()} ${c.value}`).join(", ") || <span className="app-dash">–</span>}
+                  {it.codes
+                    ?.map((c) => `${c.system.toUpperCase()} ${c.value}`)
+                    .join(", ") || <span className="app-dash">–</span>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {shown.length === 0 && <p className="app-muted app-pad">Nothing matches. Try fewer words.</p>}
+        {shown.length === 0 && (
+          <p className="app-muted app-pad">Nothing matches. Try fewer words.</p>
+        )}
       </section>
       <section className="app-card app-card--flush" aria-labelledby="dx-h">
         <div className="app-card__head app-card__head--pad">
@@ -162,15 +190,21 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
             <h2 id="dx-h" className="app-card__title">
               Diagnoses (ICD-10)
             </h2>
-            <p className="app-muted">Every claim&apos;s diagnosis codes are checked against this list before sending.</p>
+            <p className="app-muted">
+              Every claim&apos;s diagnosis codes are checked against this list
+              before sending.
+            </p>
           </div>
           <form className="app-inline-form" role="search">
             {kind && <input type="hidden" name="kind" value={kind} />}
             {q && <input type="hidden" name="q" value={q} />}
-            <div className="field field--inline">
-              <label htmlFor="f-dq">Find a diagnosis</label>
-              <input id="f-dq" name="dq" defaultValue={dq} placeholder="malaria, B50, hypertension…" />
-            </div>
+            <TextInput
+              id="f-dq"
+              name="dq"
+              label="Find a diagnosis"
+              defaultValue={dq}
+              placeholder="malaria, B50, hypertension…"
+            />
             <button type="submit" className="app-button">
               Find
             </button>
@@ -195,17 +229,23 @@ export default async function Items({ searchParams }: { searchParams: Promise<{ 
               </tbody>
             </table>
           ) : (
-            <p className="app-muted app-pad">No ICD-10 code matches “{dq}”. Try a shorter word or the first letters of the code.</p>
+            <p className="app-muted app-pad">
+              No ICD-10 code matches “{dq}”. Try a shorter word or the first
+              letters of the code.
+            </p>
           )
         ) : (
-          <p className="app-muted app-pad">Search by words or by the start of a code.</p>
+          <p className="app-muted app-pad">
+            Search by words or by the start of a code.
+          </p>
         )}
       </section>
 
       <p className="app-muted app-note">
-        The standard list is shared by every clinic and grows as we add insurers. Send a standard code straight from
-        your system as <code>{`{"system": "payahub", "value": "MED-0001"}`}</code>, or your own code once it is mapped.{" "}
-        <Link href="/docs#items">How it works</Link>
+        The standard list is shared by every clinic and grows as we add
+        insurers. Send a standard code straight from your system as{" "}
+        <code>{`{"system": "payahub", "value": "MED-0001"}`}</code>, or your own
+        code once it is mapped. <Link href="/docs#items">How it works</Link>
       </p>
     </div>
   );

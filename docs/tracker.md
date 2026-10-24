@@ -89,7 +89,7 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Brand: Ananse exchange logo and palette (PR #3)
 - [x] Standard form kit (`@/components/ui`, Mantine 9): searchable selects, remote type-ahead through
       `/lookup/[kind]`, prepend/append inputs, money in minor units, rich text, tags, dates; shown at `/ui`
-- [ ] Move every existing console form onto the kit (native selects and inputs today)
+- [x] Every console and sign-in form on the kit: all selects searchable; native fields left only for files, radio cards and checkboxes
 - [x] Landing page redesign: animated claims-flow hero, how-it-works visuals, live sandbox, share image,
       `NEXT_PUBLIC_SITE_INDEXABLE` switch for launch
 - [x] Landing page taste pass, problem story, platform layer and integration-guide sections, SEO structured data

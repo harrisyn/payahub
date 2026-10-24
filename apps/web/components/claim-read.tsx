@@ -4,6 +4,7 @@ import { startTransition, useActionState, useEffect, useState } from "react";
 
 import { readClaimForm, saveReadClaim, type ReadState } from "@/app/actions";
 import { Messages, Submit } from "@/components/forms";
+import { Select, TextInput } from "@/components/ui";
 import type { Extraction, Payer, ReadField } from "@/lib/types";
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -47,16 +48,16 @@ function RField({
   s: ReadState;
   value?: string | number;
   type?: string;
-} & React.InputHTMLAttributes<HTMLInputElement>) {
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "size">) {
   const f = x.fields[path];
   const error = s.fields?.[path];
   return (
     <div className={`field${f?.needs_review || error ? " field--check" : ""}`}>
-      <label htmlFor={`r-${name}`}>{label}</label>
-      <input
+      <TextInput
         id={`r-${name}`}
         name={name}
         type={type}
+        label={label}
         defaultValue={value ?? ""}
         aria-invalid={!!error}
         {...rest}
@@ -228,19 +229,14 @@ export function ClaimReader({ payers }: { payers: Payer[] }) {
               <div
                 className={`field${x.fields.payer_id?.needs_review || s.fields?.payer_id ? " field--check" : ""}`}
               >
-                <label htmlFor="r-payer">Insurer</label>
-                <select
+                <Select
                   id="r-payer"
                   name="payer_id"
-                  defaultValue={x.claim.payer_id}
-                >
-                  <option value="">Choose the insurer</option>
-                  {payers.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                  label="Insurer"
+                  placeholder="Choose the insurer"
+                  defaultValue={x.claim.payer_id || null}
+                  data={payers.map((p) => ({ value: p.id, label: p.name }))}
+                />
                 <Check f={x.fields.payer_id} error={s.fields?.payer_id} />
               </div>
               <div className="app-form__row">
@@ -292,16 +288,17 @@ export function ClaimReader({ payers }: { payers: Payer[] }) {
                 <div
                   className={`field${x.fields["member.gender"]?.needs_review ? " field--check" : ""}`}
                 >
-                  <label htmlFor="r-gender">Gender</label>
-                  <select
+                  <Select
                     id="r-gender"
                     name="gender"
+                    label="Gender"
                     defaultValue={x.claim.member.gender ?? ""}
-                  >
-                    <option value="">Not given</option>
-                    <option value="female">Female</option>
-                    <option value="male">Male</option>
-                  </select>
+                    data={[
+                      { value: "", label: "Not given" },
+                      { value: "female", label: "Female" },
+                      { value: "male", label: "Male" },
+                    ]}
+                  />
                   <Check f={x.fields["member.gender"]} />
                 </div>
               </div>

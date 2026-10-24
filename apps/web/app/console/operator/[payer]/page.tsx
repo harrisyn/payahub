@@ -1,21 +1,46 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AcceptForm, CodesTable, ListForm, PayerForm } from "@/components/operator-forms";
+import {
+  AcceptForm,
+  CodesTable,
+  ListForm,
+  PayerForm,
+} from "@/components/operator-forms";
 import { api } from "@/lib/api";
 import { dateTime, fieldLabels, kindName } from "@/lib/format";
 import { requireOperator } from "@/lib/session";
-import type { CatalogChange, Connector, ItemCode, ItemKind, OpPayer, PayerCodes } from "@/lib/types";
+import type {
+  CatalogChange,
+  Connector,
+  ItemCode,
+  ItemKind,
+  OpPayer,
+  PayerCodes,
+} from "@/lib/types";
+import { Select } from "@/components/ui";
 
 export const metadata = { title: "Payer" };
 
-const kinds: ItemKind[] = ["service", "lab", "imaging", "procedure", "medication", "consumable"];
+const kinds: ItemKind[] = [
+  "service",
+  "lab",
+  "imaging",
+  "procedure",
+  "medication",
+  "consumable",
+];
 
 // sure mirrors the API's rule for accepting a match without a person picking
 // it: 90% or better and 10 points ahead of the next.
 const sure = (r: ItemCode) => {
   const [a, b] = r.suggestions;
-  return !r.code && !!a && a.confidence >= 0.9 && (!b || a.confidence - b.confidence >= 0.1);
+  return (
+    !r.code &&
+    !!a &&
+    a.confidence >= 0.9 &&
+    (!b || a.confidence - b.confidence >= 0.1)
+  );
 };
 
 function describe(c: CatalogChange): string {
@@ -28,7 +53,12 @@ function describe(c: CatalogChange): string {
     case "codes_changed": {
       const set = Number(d.set ?? 0);
       const removed = Number(d.removed ?? 0);
-      return [set && `${set} ${set === 1 ? "code" : "codes"} set`, removed && `${removed} removed`].filter(Boolean).join(", ");
+      return [
+        set && `${set} ${set === 1 ? "code" : "codes"} set`,
+        removed && `${removed} removed`,
+      ]
+        .filter(Boolean)
+        .join(", ");
     }
     case "list_loaded":
       return `Code list loaded: ${Number(d.entries ?? 0).toLocaleString("en-GB")} codes`;
@@ -58,12 +88,17 @@ export default async function OperatorPayer({
   if (!p || !codes.ok) notFound();
   const label = fieldLabels(connectors.ok ? connectors.data.data : []);
   const missing = p.missing_fields.map((f) => label(p.connector.id, f));
-  const all = [...codes.data.data].sort((a, b) => kinds.indexOf(a.item.kind) - kinds.indexOf(b.item.kind));
+  const all = [...codes.data.data].sort(
+    (a, b) => kinds.indexOf(a.item.kind) - kinds.indexOf(b.item.kind),
+  );
   const hasList = codes.data.list_size > 0;
   const waiting = all.filter(sure).length;
   const notInList = all.filter((r) => r.in_list === false).length;
   const rows = all.filter(
-    (r) => (!kind || r.item.kind === kind) && (show !== "missing" || !r.code) && (show !== "outside" || r.in_list === false),
+    (r) =>
+      (!kind || r.item.kind === kind) &&
+      (show !== "missing" || !r.code) &&
+      (show !== "outside" || r.in_list === false),
   );
   const q = (k: string, s: string) => {
     const u = new URLSearchParams();
@@ -83,7 +118,9 @@ export default async function OperatorPayer({
           </p>
           <h1>{p.name}</h1>
           <p className="app-finding">
-            {p.kind === "integrated" ? `Reached through ${p.connector.name}. ` : `Reached directly through ${p.connector.name}. `}
+            {p.kind === "integrated"
+              ? `Reached through ${p.connector.name}. `
+              : `Reached directly through ${p.connector.name}. `}
             {p.inactive
               ? "Withdrawn: no organisation can choose it."
               : missing.length
@@ -105,7 +142,8 @@ export default async function OperatorPayer({
         <div>
           <dt>Payer&apos;s own list</dt>
           <dd>
-            {codes.data.list_size.toLocaleString("en-GB")} <span className="app-unit">codes</span>
+            {codes.data.list_size.toLocaleString("en-GB")}{" "}
+            <span className="app-unit">codes</span>
           </dd>
         </div>
         <div>
@@ -137,28 +175,46 @@ export default async function OperatorPayer({
           {kinds.map((k) => {
             const c = codes.data.coverage[k];
             return c ? (
-              <Link key={k} href={q(k, show)} aria-current={kind === k ? "page" : undefined}>
-                {kindName[k]} <span className="app-muted num">{c.coded}/{c.total}</span>
+              <Link
+                key={k}
+                href={q(k, show)}
+                aria-current={kind === k ? "page" : undefined}
+              >
+                {kindName[k]}{" "}
+                <span className="app-muted num">
+                  {c.coded}/{c.total}
+                </span>
               </Link>
             ) : null;
           })}
         </nav>
         <form className="app-inline-form app-pad-y">
           {kind && <input type="hidden" name="kind" value={kind} />}
-          <div className="field field--inline">
-            <label htmlFor="f-show">Show</label>
-            <select id="f-show" name="show" defaultValue={show}>
-              <option value="">Every item</option>
-              <option value="missing">Items without a code</option>
-              {hasList && <option value="outside">Codes not in the payer&apos;s list</option>}
-            </select>
-          </div>
+          <Select
+            id="f-show"
+            name="show"
+            label="Show"
+            defaultValue={show}
+            data={[
+              { value: "", label: "Every item" },
+              { value: "missing", label: "Items without a code" },
+              ...(hasList
+                ? [{ value: "outside", label: "Codes not in the payer's list" }]
+                : []),
+            ]}
+            className="app-inline-form__show"
+          />
           <button type="submit" className="app-button">
             Show
           </button>
         </form>
         {rows.length ? (
-          <CodesTable key={`${kind}-${show}`} payer={p.id} rows={rows} hasList={hasList} />
+          <CodesTable
+            key={`${kind}-${show}`}
+            payer={p.id}
+            rows={rows}
+            hasList={hasList}
+          />
         ) : (
           <p className="app-muted app-pad">Nothing to show here.</p>
         )}
@@ -169,7 +225,10 @@ export default async function OperatorPayer({
           <h2 id="set-h" className="app-card__title">
             Payer settings
           </h2>
-          <PayerForm payer={p} connectors={connectors.ok ? connectors.data.data : []} />
+          <PayerForm
+            payer={p}
+            connectors={connectors.ok ? connectors.data.data : []}
+          />
         </section>
         <div className="app-stack">
           <section className="app-card" aria-labelledby="list-h">
@@ -191,10 +250,14 @@ export default async function OperatorPayer({
               <ol className="app-trail">
                 {changes.data.data.map((c, i) => (
                   <li key={i} className="app-trail__item">
-                    <span className="app-trail__when">{dateTime(c.changed_at)}</span>
+                    <span className="app-trail__when">
+                      {dateTime(c.changed_at)}
+                    </span>
                     <span>
                       <span className="app-step__title">{describe(c)}</span>
-                      <span className="app-muted app-block">by {c.changed_by}</span>
+                      <span className="app-muted app-block">
+                        by {c.changed_by}
+                      </span>
                     </span>
                   </li>
                 ))}

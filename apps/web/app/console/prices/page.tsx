@@ -5,14 +5,20 @@ import { api } from "@/lib/api";
 import { kindName, money } from "@/lib/format";
 import { requireOrg } from "@/lib/session";
 import type { Item, Price } from "@/lib/types";
+import { Select, TextInput } from "@/components/ui";
 
 export const metadata = { title: "Price list" };
 
 const SHOWN = 200;
 const SURE = 0.9;
-const pick = (p: Price, item: string) => [p.local_code, item, p.name].join("\u001f");
+const pick = (p: Price, item: string) =>
+  [p.local_code, item, p.name].join("\u001f");
 
-export default async function Prices({ searchParams }: { searchParams: Promise<{ q?: string; show?: string }> }) {
+export default async function Prices({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; show?: string }>;
+}) {
   await requireOrg();
   const { q = "", show = "" } = await searchParams;
   const [res, items] = await Promise.all([
@@ -20,15 +26,21 @@ export default async function Prices({ searchParams }: { searchParams: Promise<{
     api<{ data: Item[] }>("/v1/items"),
   ]);
   const all = res.ok ? res.data.data : [];
-  const byId = new Map((items.ok ? items.data.data : []).map((it) => [it.id, it]));
+  const byId = new Map(
+    (items.ok ? items.data.data : []).map((it) => [it.id, it]),
+  );
   const needle = q.trim().toLowerCase();
   const rows = all.filter(
     (p) =>
-      (!needle || p.local_code.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle)) &&
+      (!needle ||
+        p.local_code.toLowerCase().includes(needle) ||
+        p.name.toLowerCase().includes(needle)) &&
       (show !== "unmapped" || !p.item_id),
   );
   const unmapped = all.filter((p) => !p.item_id);
-  const sure = unmapped.filter((p) => p.suggestion && p.suggestion.confidence >= SURE);
+  const sure = unmapped.filter(
+    (p) => p.suggestion && p.suggestion.confidence >= SURE,
+  );
 
   return (
     <div className="app-page">
@@ -65,17 +77,24 @@ export default async function Prices({ searchParams }: { searchParams: Promise<{
               Your prices
             </h2>
             <form className="app-inline-form" role="search">
-              <div className="field field--inline">
-                <label htmlFor="f-q">Search</label>
-                <input id="f-q" name="q" defaultValue={q} placeholder="code or name" />
-              </div>
-              <div className="field field--inline">
-                <label htmlFor="f-show">Show</label>
-                <select id="f-show" name="show" defaultValue={show}>
-                  <option value="">All</option>
-                  <option value="unmapped">Without a standard item</option>
-                </select>
-              </div>
+              <TextInput
+                id="f-q"
+                name="q"
+                label="Search"
+                defaultValue={q}
+                placeholder="code or name"
+              />
+              <Select
+                id="f-show"
+                name="show"
+                label="Show"
+                defaultValue={show}
+                data={[
+                  { value: "", label: "All" },
+                  { value: "unmapped", label: "Without a standard item" },
+                ]}
+                className="app-inline-form__show"
+              />
               <button type="submit" className="app-button">
                 Show
               </button>
@@ -84,11 +103,17 @@ export default async function Prices({ searchParams }: { searchParams: Promise<{
           {sure.length > 0 && (
             <form action={confirmItems} className="app-banner">
               {sure.map((p) => (
-                <input key={p.local_code} type="hidden" name="pick" value={pick(p, p.suggestion!.item.id)} />
+                <input
+                  key={p.local_code}
+                  type="hidden"
+                  name="pick"
+                  value={pick(p, p.suggestion!.item.id)}
+                />
               ))}
               <p>
-                <strong>{sure.length}</strong> of your codes match a standard item at {SURE * 100}% or better. Check the
-                list below, then confirm them together.
+                <strong>{sure.length}</strong> of your codes match a standard
+                item at {SURE * 100}% or better. Check the list below, then
+                confirm them together.
               </p>
               <Submit className="app-button">Confirm {sure.length}</Submit>
             </form>
@@ -126,32 +151,46 @@ export default async function Prices({ searchParams }: { searchParams: Promise<{
                         {p.kind ? kindName[p.kind] : ""}
                       </span>
                     </td>
-                    <td className="app-right app-nowrap">{money(p.unit_price, p.currency)}</td>
+                    <td className="app-right app-nowrap">
+                      {money(p.unit_price, p.currency)}
+                    </td>
                     <td>
                       {p.item_id ? (
                         <>
                           {it?.name ?? p.item_id}
-                          <span className="app-muted app-block">{p.item_id}</span>
+                          <span className="app-muted app-block">
+                            {p.item_id}
+                          </span>
                         </>
                       ) : sg ? (
                         <form action={confirmItems} className="app-confirm">
-                          <input type="hidden" name="pick" value={pick(p, sg.item.id)} />
+                          <input
+                            type="hidden"
+                            name="pick"
+                            value={pick(p, sg.item.id)}
+                          />
                           <span>
                             {sg.item.name}
                             <span className="app-muted app-block">
                               Suggested · {Math.round(sg.confidence * 100)}%
                             </span>
                           </span>
-                          <Submit className="app-button app-button--small">Confirm</Submit>
+                          <Submit className="app-button app-button--small">
+                            Confirm
+                          </Submit>
                         </form>
                       ) : (
-                        <span className="app-muted">No close standard item</span>
+                        <span className="app-muted">
+                          No close standard item
+                        </span>
                       )}
                     </td>
                     <td className="app-right">
                       <form action={deletePrice}>
                         <input type="hidden" name="code" value={p.local_code} />
-                        <Submit className="app-button app-button--quiet">Remove</Submit>
+                        <Submit className="app-button app-button--quiet">
+                          Remove
+                        </Submit>
                       </form>
                     </td>
                   </tr>
@@ -161,10 +200,13 @@ export default async function Prices({ searchParams }: { searchParams: Promise<{
           </table>
           {rows.length > SHOWN && (
             <p className="app-muted app-pad">
-              Showing {SHOWN} of {rows.length.toLocaleString("en-GB")}. Search to find the rest.
+              Showing {SHOWN} of {rows.length.toLocaleString("en-GB")}. Search
+              to find the rest.
             </p>
           )}
-          {!rows.length && <p className="app-muted app-pad">Nothing matches.</p>}
+          {!rows.length && (
+            <p className="app-muted app-pad">Nothing matches.</p>
+          )}
         </section>
       )}
     </div>

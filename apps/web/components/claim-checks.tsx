@@ -10,6 +10,7 @@ import {
   type SendState,
 } from "@/app/actions";
 import { Messages, Submit } from "@/components/forms";
+import { TextInput } from "@/components/ui";
 
 export type Issue = {
   code: string;
@@ -140,15 +141,13 @@ export function ClaimChecks({
               </label>
             ))}
           </fieldset>
-          <div className="field">
-            <label htmlFor="c-note">Note (optional)</label>
-            <input
-              id="c-note"
-              name="note"
-              maxLength={500}
-              placeholder="What you checked, e.g. a second visit the same day"
-            />
-          </div>
+          <TextInput
+            id="c-note"
+            name="note"
+            label="Note (optional)"
+            maxLength={500}
+            placeholder="What you checked, e.g. a second visit the same day"
+          />
           <div className="app-form__foot">
             <Submit className="app-button">Confirm what I checked</Submit>
             <Messages state={confirmed} />
