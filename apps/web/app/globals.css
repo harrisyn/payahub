@@ -541,3 +541,21 @@ label.app-issue input { margin-top: 4px; }
 .app-review { margin-top: 8px; }
 .app-checks__send { margin-top: 16px; flex-wrap: wrap; }
 .app-button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Webhooks */
+.app-grow { flex: 1 1 320px; min-width: 0; }
+.app-grow input { width: 100%; }
+.field--error input, .field--error select { border-color: #b42318; }
+.app-secret { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 16px; }
+.app-secret span { flex: 1 1 100%; }
+.app-secret code { overflow-wrap: anywhere; flex: 1 1 280px; }
+.app-bad { color: #831c1e; }
+.app-wrap { overflow-wrap: anywhere; }
+.app-measure { max-width: 68ch; }
+@media (max-width: 720px) {
+  .app-table--stack, .app-table--stack tbody, .app-table--stack tr, .app-table--stack td { display: block; width: 100%; }
+  .app-table--stack thead { display: none; }
+  .app-table--stack tr { border-top: 1px solid var(--rule); padding: 12px 0; }
+  .app-table--stack td { border-top: 0; padding: 3px 0; }
+  .app-table--stack td.app-right { text-align: left; padding-top: 10px; }
+}

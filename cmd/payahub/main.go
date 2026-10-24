@@ -34,6 +34,7 @@ import (
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
+	"github.com/harrisyn/payahub/internal/webhook"
 )
 
 const sandboxKey = "sk_sandbox_dev"
@@ -141,6 +142,16 @@ func mailerFrom(logger *slog.Logger) (mail.Sender, error) {
 	return m, nil
 }
 
+// privateWebhooks lets webhooks go to http and internal addresses, for
+// development: PAYAHUB_WEBHOOKS_ALLOW_PRIVATE=1, or the dev command.
+func privateWebhooks() bool {
+	return os.Getenv("PAYAHUB_WEBHOOKS_ALLOW_PRIVATE") == "1" || (len(os.Args) > 1 && os.Args[1] == "dev")
+}
+
+func dispatcher(st *store.Store, v *vault.Vault, logger *slog.Logger) *webhook.Dispatcher {
+	return &webhook.Dispatcher{Store: st, Vault: v, HTTP: webhook.Client(privateWebhooks()), Logger: logger}
+}
+
 func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) error {
 	rc, err := queue.NewClient(st, v, workers, logger, mailer)
 	if err != nil {
@@ -149,6 +160,7 @@ func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, log
 	if err := rc.Start(ctx); err != nil {
 		return err
 	}
+	go dispatcher(st, v, logger).Run(ctx)
 	<-ctx.Done()
 	// Finish in-flight submissions; anything unfinished is retried by the next worker.
 	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -165,10 +177,12 @@ func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, lo
 		if err := rc.Start(ctx); err != nil {
 			return err
 		}
+		go dispatcher(st, v, logger).Run(ctx)
 	}
 	srv := &http.Server{
-		Addr:              env("PAYAHUB_ADDR", ":8080"),
-		Handler:           (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, ConsoleURL: os.Getenv("PAYAHUB_CONSOLE_URL")}).Handler(),
+		Addr: env("PAYAHUB_ADDR", ":8080"),
+		Handler: (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, ConsoleURL: os.Getenv("PAYAHUB_CONSOLE_URL"),
+			AllowPrivateWebhooks: privateWebhooks()}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

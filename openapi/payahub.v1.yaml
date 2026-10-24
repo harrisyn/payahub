@@ -675,6 +675,92 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/webhook-endpoints:
+    post:
+      summary: Add an endpoint that hears about every claim event
+      description: |
+        Payahub posts each claim event (claim.created, claim.submission_queued, claim.submission_started,
+        claim.attempt_failed, claim.acknowledged, claim.rejected, claim.returned_to_ready,
+        claim.validation_failed, claim.reviewed, and ping) to the endpoint as JSON, signed in the
+        Standard Webhooks format: headers webhook-id, webhook-timestamp and webhook-signature
+        (v1, then base64 HMAC-SHA256 of "id.timestamp.body" with the secret's base64 key). Each event is
+        written in the same transaction as the change it reports, so none is lost. Delivery is at least
+        once and not ordered: drop repeats by id and order by created_at. A non-2xx answer is retried
+        with backoff for about two and a half days. The address must be public https. An API key's
+        endpoint hears its own environment; a console session names one (sandbox by default).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, example: "https://hms.example.com/payahub/events" }
+                description: { type: string, maxLength: 200 }
+                environment: { enum: [sandbox, live], description: Session only }
+      responses:
+        "201":
+          description: Made. The secret is shown this once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoint: { $ref: "#/components/schemas/WebhookEndpoint" }
+                  secret: { type: string, example: "whsec_..." }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      summary: List webhook endpoints, with how their deliveries are going
+      parameters:
+        - { name: environment, in: query, schema: { enum: [sandbox, live] }, description: Session only }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/WebhookEndpoint" } } } }
+  /v1/webhook-endpoints/{id}:
+    delete:
+      summary: Remove an endpoint and its undelivered events
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/webhook-endpoints/{id}/ping:
+    post:
+      summary: Send a ping event to check the endpoint
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "202": { description: Queued }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/webhook-endpoints/{id}/deliveries:
+    get:
+      summary: The endpoint's last 50 deliveries, newest first
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        event_type: { type: string }
+                        status: { enum: [pending, delivered, failed] }
+                        attempts: { type: integer }
+                        last_status: { type: integer }
+                        last_error: { type: string }
+                        created_at: { type: string, format: date-time }
+                        delivered_at: { type: string, format: date-time }
+                        payload: { $ref: "#/components/schemas/WebhookEvent" }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/diagnoses:
     get:
       summary: Find ICD-10 codes by the start of a code ("B50") or by words ("falciparum malaria")
@@ -1559,6 +1645,33 @@ components:
             total: { type: integer, description: Minor units }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
+    WebhookEndpoint:
+      type: object
+      properties:
+        id: { type: string }
+        environment: { enum: [sandbox, live] }
+        url: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        delivered_24h: { type: integer }
+        failing: { type: integer, description: Events still being retried after a failed attempt }
+        last_error: { type: string }
+        last_delivered_at: { type: string, format: date-time }
+    WebhookEvent:
+      type: object
+      properties:
+        id: { type: string, example: evt_1842 }
+        type: { type: string, example: claim.acknowledged }
+        created_at: { type: string, format: date-time }
+        data:
+          type: object
+          properties:
+            claim_id: { type: string }
+            state: { type: string }
+            previous_state: { type: string }
+            payer_claim_number: { type: string }
+            detail: { type: object, description: "The event's detail: an error, the checks, the plan" }
     Settled:
       type: object
       properties:

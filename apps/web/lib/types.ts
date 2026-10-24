@@ -331,3 +331,28 @@ export type AIUsage = {
   output_tokens: number;
   avg_ms: number;
 };
+
+export type WebhookEndpoint = {
+  id: string;
+  environment: "sandbox" | "live";
+  url: string;
+  description: string;
+  enabled: boolean;
+  created_at: string;
+  delivered_24h: number;
+  failing: number;
+  last_error?: string;
+  last_delivered_at?: string;
+};
+
+export type WebhookDelivery = {
+  id: number;
+  event_type: string;
+  status: "pending" | "delivered" | "failed";
+  attempts: number;
+  last_status?: number;
+  last_error?: string;
+  created_at: string;
+  delivered_at?: string;
+  payload: { id: string; type: string; data?: { claim_id?: string; state?: string } };
+};

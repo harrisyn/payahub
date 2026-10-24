@@ -101,7 +101,7 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Real-time answers: create or submit with `Prefer: wait=N` and get the payer's answer in the same response (202 if it takes longer); the async path stays
 - [x] Remove patient identity before every AI call: a provider refuses any text or file the de-identifier did not produce; forms are blacked out on our server (Tesseract) and the model sees only those pages; what was removed is kept on each AI run
 - [ ] Try the redaction on real Ghanaian forms (handwritten, photographed at an angle) and widen the labels it knows
-- [ ] Webhooks to the clinic's system on every state change
+- [x] Webhooks to the clinic's system on every state change: written with the event in one transaction, signed (Standard Webhooks), retried for about 2.5 days, delivery log and test sends in the console
 - [x] Wallets: double-entry ledger; organisation and platform wallets; per-claim charges on acknowledgement and
       monthly fees from the wallet; live claims pause when the wallet does not cover one more
 - [x] Payment providers behind one interface: Paystack (card, mobile money, bank payouts) and a sandbox;

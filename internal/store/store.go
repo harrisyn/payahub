@@ -302,9 +302,23 @@ func addEvent(ctx context.Context, q Querier, claimID, kind string, from, to cla
 			return err
 		}
 	}
+	// The event, and a webhook delivery of it to each of the organisation's
+	// endpoints for the claim's environment, in one statement.
 	_, err := q.Exec(ctx, `
-		INSERT INTO claim_events (claim_id, kind, from_state, to_state, detail)
-		VALUES ($1, $2, NULLIF($3, ''), $4, $5)`, claimID, kind, string(from), string(to), raw)
+		WITH ev AS (
+			INSERT INTO claim_events (claim_id, kind, from_state, to_state, detail)
+			VALUES ($1, $2, NULLIF($3, ''), $4, $5)
+			RETURNING id, claim_id, kind, from_state, to_state, detail, created_at)
+		INSERT INTO webhook_deliveries (endpoint_id, event_type, payload)
+		SELECT w.id, 'claim.' || ev.kind, jsonb_build_object(
+			'id', 'evt_' || ev.id, 'type', 'claim.' || ev.kind, 'created_at', ev.created_at,
+			'data', jsonb_strip_nulls(jsonb_build_object(
+				'claim_id', ev.claim_id, 'state', ev.to_state, 'previous_state', ev.from_state,
+				'payer_claim_number', c.payer_claim_number, 'detail', ev.detail)))
+		FROM ev
+		JOIN claims c ON c.id = ev.claim_id
+		JOIN webhook_endpoints w ON w.organization_id = c.organization_id AND w.environment = c.environment AND w.enabled`,
+		claimID, kind, string(from), string(to), raw)
 	return err
 }
 

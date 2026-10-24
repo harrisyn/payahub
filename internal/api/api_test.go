@@ -25,6 +25,7 @@ import (
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
+	"github.com/harrisyn/payahub/internal/webhook"
 )
 
 // These tests need Postgres: set PAYAHUB_TEST_DATABASE_URL (CI does).
@@ -74,7 +75,8 @@ func setup(t testing.TB) env {
 			return
 		}
 		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
-		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, OCR: formOCR{}}).Handler())
+		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, OCR: formOCR{}, AllowPrivateWebhooks: true}).Handler())
+		go (&webhook.Dispatcher{Store: st, Vault: v, HTTP: webhook.Client(true), Logger: logger, Every: 50 * time.Millisecond}).Run(ctx)
 	})
 	if setupErr != nil {
 		t.Fatal(setupErr)

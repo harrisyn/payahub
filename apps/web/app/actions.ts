@@ -787,3 +787,27 @@ export async function confirmIssues(_: FormState, form: FormData): Promise<FormS
   revalidatePath(`/console/claims/${id}`);
   return { ok: confirm.length === 1 ? "Confirmed." : `${confirm.length} confirmed.` };
 }
+
+export type HookState = FormState & { secret?: string; url?: string };
+
+// addWebhook makes an endpoint; its signing secret is shown once, here.
+export async function addWebhook(_: HookState, form: FormData): Promise<HookState> {
+  const values = { url: text(form, "url"), description: text(form, "description"), environment: text(form, "environment") || "sandbox" };
+  const res = await api<{ secret: string; endpoint: { url: string } }>("/v1/webhook-endpoints", { method: "POST", body: values });
+  if (!res.ok) {
+    const d = res.error.details as Record<string, string> | undefined;
+    return { error: res.error.message, fields: d, values };
+  }
+  revalidatePath("/console/developers");
+  return { secret: res.data.secret, url: res.data.endpoint.url };
+}
+
+export async function pingWebhook(form: FormData) {
+  await api(`/v1/webhook-endpoints/${encodeURIComponent(text(form, "id"))}/ping`, { method: "POST" });
+  revalidatePath("/console/developers");
+}
+
+export async function removeWebhook(form: FormData) {
+  await api(`/v1/webhook-endpoints/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  revalidatePath("/console/developers");
+}

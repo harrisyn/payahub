@@ -35,6 +35,9 @@ type Server struct {
 	OCR deid.OCR
 	// ConsoleURL is the web app's address, for links in email.
 	ConsoleURL string
+	// AllowPrivateWebhooks lets webhook endpoints be http or internal
+	// addresses (development only).
+	AllowPrivateWebhooks bool
 }
 
 func (s *Server) Handler() http.Handler {
@@ -59,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	s.walletRoutes(mux)
 	s.aiRoutes(mux)
 	s.assistRoutes(mux)
+	s.webhookRoutes(mux)
 	return mux
 }
 
