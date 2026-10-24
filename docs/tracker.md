@@ -31,7 +31,8 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
       20 procedures, 124 medicines with ATC codes, 20 consumables), each found first by its name and every synonym
 - [x] Diagnoses: ICD-10 list (ICD-10-CM plus WHO-only codes in use in Ghana), search, and checks on every claim
 - [ ] Payer diagnosis codes where a payer uses its own; the NHIA medicines list once we have the file
-- [ ] Refresh the ICD-10 list to the latest release (the shipped copy predates 2020; WHO COVID codes are added by hand)
+- [x] ICD-10 list refreshed to the ICD-10-CM 2026 release (1 April 2026): 98,186 codes, 2,564 more than before
+      (COVID-19 and post-COVID codes among them); `go run ./internal/icd10/gen` rebuilds it from the next release
 - [x] Claims carry prescriptions on drug lines and provisional/confirmed status on diagnoses
 
 ## 3. Connectors that really call the platforms

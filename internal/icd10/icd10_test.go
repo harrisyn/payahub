@@ -10,6 +10,8 @@ func TestCheck(t *testing.T) {
 		"B50.88": Category, // not listed, category known
 		"B5":     Invalid, "50.9": Invalid, "B5.09": Invalid, "": Invalid,
 		"Q999": Listed, "U999": Unknown,
+		"U09.9": Listed, "Z11.52": Listed, // added since 2020: post COVID-19 condition, COVID-19 screening
+		"S00.01XA": Listed, // a seventh character written out
 	} {
 		if _, got := Check(in); got != want {
 			t.Errorf("Check(%q) = %d, want %d", in, got, want)
