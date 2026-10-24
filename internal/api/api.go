@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/claims/{id}/submit", s.auth(s.submitClaim))
 	mux.Handle("GET /v1/claims/{id}/checks", s.auth(s.claimChecks))
 	mux.Handle("POST /v1/claims/{id}/review", s.auth(s.reviewClaim))
+	mux.Handle("POST /v1/claims/{id}/status-check", s.auth(s.statusCheck))
 	s.catalogRoutes(mux)
 	s.consoleRoutes(mux)
 	s.operatorRoutes(mux)

@@ -49,7 +49,7 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] ClaimIQ (7: whole claim plus batch of one, line by line, idempotent retries)
 - [ ] Live check of each against the real platform (blocked: needs test accounts)
 - [x] Member check and OTP in the console and the API: `POST /v1/member-checks` waits for the answer; the code is sealed on its way to the worker
-- [ ] Claim status from the payer after sending (accepted, queried, paid, rejected with reason)
+- [x] Claim status from the payer after sending: followed until paid or rejected (2h, 6h, 12h, then daily for 120 days), each change an event and webhook; `POST /v1/claims/{id}/status-check` asks now
 
 ## 4. AI translation and matching
 

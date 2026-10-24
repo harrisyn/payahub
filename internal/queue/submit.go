@@ -56,6 +56,8 @@ func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger
 	river.AddWorker(ws, &EmailWorker{Sender: mailer})
 	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
 	river.AddWorker(ws, &MemberCheckWorker{Store: st, Vault: v})
+	river.AddWorker(ws, &StatusSweepWorker{Store: st})
+	river.AddWorker(ws, &StatusWorker{Store: st, Vault: v})
 	river.AddWorker(ws, &PayoutWorker{Store: st})
 	river.AddWorker(ws, &BillingWorker{Store: st, Logger: logger})
 	// A caller may be waiting on the payer's answer (submit and wait), so a
@@ -68,9 +70,14 @@ func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger
 			MoneyQueue:       {MaxWorkers: 10},
 			MailQueue:        {MaxWorkers: 5},
 		}
-		cfg.PeriodicJobs = []*river.PeriodicJob{river.NewPeriodicJob(river.PeriodicInterval(billingEvery),
-			func() (river.JobArgs, *river.InsertOpts) { return BillingArgs{}, nil },
-			&river.PeriodicJobOpts{ID: "billing", RunOnStart: true})}
+		cfg.PeriodicJobs = []*river.PeriodicJob{
+			river.NewPeriodicJob(river.PeriodicInterval(billingEvery),
+				func() (river.JobArgs, *river.InsertOpts) { return BillingArgs{}, nil },
+				&river.PeriodicJobOpts{ID: "billing", RunOnStart: true}),
+			river.NewPeriodicJob(river.PeriodicInterval(statusSweepEvery),
+				func() (river.JobArgs, *river.InsertOpts) { return StatusSweepArgs{}, nil },
+				&river.PeriodicJobOpts{ID: "status_sweep", RunOnStart: true}),
+		}
 	}
 	return river.NewClient(riverpgxv5.New(st.Pool), cfg)
 }

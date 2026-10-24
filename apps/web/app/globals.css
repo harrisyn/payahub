@@ -576,3 +576,12 @@ label.app-issue input { margin-top: 4px; }
 .app-inline-form__show { width: 240px; }
 .app-measure-card { max-width: 760px; }
 .app-form__row--wide { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+
+/* Where a sent claim stands at the insurer */
+.app-insurer { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; justify-content: space-between; }
+.app-insurer__body { flex: 1 1 320px; display: grid; gap: 6px; }
+.app-insurer__body p { margin: 0; }
+.app-insurer__ask { display: grid; gap: 6px; justify-items: end; }
+.app-insurer--query { border-color: #D97706; background: #fffbeb; }
+.app-insurer__question { font-weight: 600; color: #92400e; }
+@media (max-width: 720px) { .app-insurer__ask { justify-items: start; } }

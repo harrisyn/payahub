@@ -638,6 +638,21 @@ paths:
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Validation" } } } }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/claims/{id}/status-check:
+    post:
+      summary: Ask the payer now where an acknowledged claim stands
+      description: |
+        After a payer acknowledges a claim, Payahub asks it again on its own (about 2 hours later,
+        then 6 h, 12 h, then daily, for 120 days) until the claim is paid or rejected. Each change is
+        a claim event and a webhook: claim.approved, claim.paid, claim.rejected, and claim.queried
+        when the payer asks a question (in payer_message). This asks now instead, and waits up to
+        20 seconds (or `Prefer: wait=N`) for the answer.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: The claim, with payer_status, payer_message and status_checked_at }
+        "202": { description: The payer has not answered yet }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "not_with_payer: the claim is not acknowledged or approved" }
   /v1/claims/{id}/review:
     post:
       summary: Confirm issues awaiting review
@@ -831,7 +846,8 @@ paths:
       summary: Add an endpoint that hears about every claim event
       description: |
         Payahub posts each claim event (claim.created, claim.submission_queued, claim.submission_started,
-        claim.attempt_failed, claim.acknowledged, claim.rejected, claim.returned_to_ready,
+        claim.attempt_failed, claim.acknowledged, claim.approved, claim.paid, claim.queried,
+        claim.rejected, claim.returned_to_ready,
         claim.validation_failed, claim.reviewed, and ping) to the endpoint as JSON, signed in the
         Standard Webhooks format: headers webhook-id, webhook-timestamp and webhook-signature
         (v1, then base64 HMAC-SHA256 of "id.timestamp.body" with the secret's base64 key). Each event is
@@ -1793,6 +1809,9 @@ components:
             state:
               enum: [draft, mapped, validated, needs_review, ready, submitted, acknowledged, approved, rejected, paid, withdrawn]
             payer_claim_number: { type: string }
+            payer_status: { enum: [open, submitted, approved, queried, rejected, paid, unknown], description: What the payer last said after acknowledgement }
+            payer_message: { type: string, description: "The payer's own words, such as its question" }
+            status_checked_at: { type: string, format: date-time }
             total: { type: integer, description: Minor units }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }

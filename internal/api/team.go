@@ -24,6 +24,7 @@ var writes = map[string]access.Perm{
 	"POST /v1/claims/{id}/review":                         access.WorkClaims,
 	"POST /v1/claims/extract":                             access.WorkClaims,
 	"POST /v1/member-checks":                              access.WorkClaims,
+	"POST /v1/claims/{id}/status-check":                   access.WorkClaims,
 	"POST /v1/items/suggest":                              access.Setup,
 	"PUT /v1/organization/profile":                        access.Setup,
 	"PUT /v1/payer-settings/{payer}/{env}":                access.Setup,

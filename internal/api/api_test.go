@@ -39,6 +39,7 @@ var (
 	shared    *httptest.Server
 	st        *store.Store
 	setupErr  error
+	testQueue *queue.Client
 )
 
 func setup(t testing.TB) env {
@@ -49,6 +50,9 @@ func setup(t testing.TB) env {
 	}
 	setupOnce.Do(func() {
 		ctx := context.Background()
+		// Claims are followed after acknowledgement only when a test asks,
+		// so states stay put while other tests look at them.
+		store.StatusFirstCheck["sandbox"] = time.Hour
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		if st, setupErr = store.Open(ctx, url); setupErr != nil {
 			return
@@ -71,6 +75,7 @@ func setup(t testing.TB) env {
 		if setupErr = err; err != nil {
 			return
 		}
+		testQueue = rc
 		if setupErr = rc.Start(ctx); setupErr != nil {
 			return
 		}

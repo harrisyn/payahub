@@ -215,7 +215,9 @@ func reconcile(ctx context.Context, conn connector.Connector, s *connector.Submi
 		return nil, err
 	}
 	switch pc.Status {
-	case connector.PayerSubmitted, connector.PayerApproved, connector.PayerPaid, connector.PayerQueried:
+	// Already with the payer, whatever it has decided since; the status
+	// follow-up records the decision.
+	case connector.PayerSubmitted, connector.PayerApproved, connector.PayerPaid, connector.PayerQueried, connector.PayerRejected:
 		return &connector.Receipt{PayerClaimNumber: p.PayerClaimNumber, Acknowledged: true}, nil
 	}
 	// Payer lines we know about are spoken for; any other line with the code

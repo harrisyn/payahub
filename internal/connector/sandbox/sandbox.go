@@ -12,6 +12,11 @@
 //	FLAKY...      the first send times out before reaching the payer
 //	LOSTREPLY...  the first send reaches the payer but the reply is lost
 //	SLOW...       the payer takes SlowFor to answer, then acknowledges
+//
+// Asked later (FetchClaim), an acknowledged claim is approved, unless the
+// member number starts PAID (paid), QUERY (the payer asks a question),
+// DENY (rejected after review) or WAIT (still under review).
+//
 //	anything else eligible; claim acknowledged
 package sandbox
 
@@ -62,6 +67,7 @@ var payer = struct {
 
 type record struct {
 	status    string
+	member    string                         // picks how the claim is settled after acknowledgement
 	lines     map[string]connector.PayerLine // by payer ref
 	seq       int
 	diagnoses []string
@@ -134,6 +140,22 @@ func (Sandbox) VerifyMember(_ context.Context, memberNumber, otp string) (connec
 	}, nil
 }
 
+// settle is where an acknowledged sandbox claim ends up when asked again:
+// the member number picks it, approved by default.
+func settle(member string) (connector.PayerStatus, string) {
+	switch m := strings.ToUpper(member); {
+	case strings.HasPrefix(m, "PAID"):
+		return connector.PayerPaid, "Paid in the weekly settlement."
+	case strings.HasPrefix(m, "QUERY"):
+		return connector.PayerQueried, "Send the lab report for the full blood count."
+	case strings.HasPrefix(m, "DENY"):
+		return connector.PayerRejected, "Not covered under the member's plan."
+	case strings.HasPrefix(m, "WAIT"):
+		return connector.PayerSubmitted, ""
+	}
+	return connector.PayerApproved, ""
+}
+
 // SendOTP pretends to text the member the sandbox code.
 func (Sandbox) SendOTP(_ context.Context, memberNumber string) (string, error) {
 	if strings.HasPrefix(strings.ToUpper(memberNumber), "NOTFOUND") {
@@ -181,7 +203,7 @@ func (Sandbox) SubmitWholeClaim(_ context.Context, s *connector.Submission) (con
 	c := s.Claim
 	return send(c, func() connector.Receipt {
 		number := ClaimNumber(c.ID)
-		r := &record{status: "acknowledged", lines: map[string]connector.PayerLine{}}
+		r := &record{status: "acknowledged", member: c.Member.MemberNumber, lines: map[string]connector.PayerLine{}}
 		refs := make(map[string]string, len(s.Lines))
 		for i, l := range s.Lines {
 			ref := fmt.Sprintf("%s-%d", number, i+1)
@@ -200,7 +222,7 @@ func (Sandbox) OpenClaim(_ context.Context, s *connector.Submission) (string, er
 	defer payer.Unlock()
 	number := ClaimNumber(s.Claim.ID)
 	if _, ok := payer.claims[number]; !ok {
-		payer.claims[number] = &record{status: "open", lines: map[string]connector.PayerLine{}}
+		payer.claims[number] = &record{status: "open", member: s.Claim.Member.MemberNumber, lines: map[string]connector.PayerLine{}}
 	}
 	return number, nil
 }
@@ -304,11 +326,12 @@ func (Sandbox) FetchClaim(_ context.Context, number string) (*connector.PayerCla
 	defer payer.Unlock()
 	r, ok := payer.claims[number]
 	if !ok {
-		return nil, connector.Errorf(connector.ClaimClosed, "no claim %s", number)
+		// Not in this process's memory (the sandbox forgets on restart).
+		return &connector.PayerClaim{Number: number, Status: connector.PayerUnknown}, nil
 	}
 	pc := &connector.PayerClaim{Number: number, Status: connector.PayerOpen}
 	if r.status == "acknowledged" {
-		pc.Status = connector.PayerSubmitted
+		pc.Status, pc.Message = settle(r.member)
 	}
 	for _, ref := range slices.Sorted(maps.Keys(r.lines)) {
 		pc.Lines = append(pc.Lines, r.lines[ref])

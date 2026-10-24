@@ -214,7 +214,7 @@ curl -X POST ${base}/v1/claims/<id>/submit -H "Authorization: Bearer <your sandb
         </pre>
         <p className="app-muted">
           Amounts are in pesewas, so 15000 is GHS 150.00. Member numbers
-          starting NOTFOUND, OTP, REJECT, FLAKY, LOSTREPLY or SLOW take the
+          starting NOTFOUND, OTP, INACTIVE, REJECT, FLAKY, LOSTREPLY or SLOW take the
           sandbox&apos;s failure paths.
         </p>
       </section>

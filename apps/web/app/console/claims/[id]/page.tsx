@@ -6,6 +6,9 @@ import { dateTime, money, stateLabel, stateTone } from "@/lib/format";
 import type { ClaimEvent, ClaimState } from "@/lib/types";
 
 import { ClaimChecks, type Issue } from "@/components/claim-checks";
+import { WithInsurer } from "@/components/claim-status";
+import { can } from "@/lib/roles";
+import { requireOrg } from "@/lib/session";
 
 import { Refresh } from "./refresh";
 
@@ -17,6 +20,9 @@ type Claim = {
   state: ClaimState;
   payer_id: string;
   payer_claim_number?: string;
+  payer_status?: string;
+  payer_message?: string;
+  status_checked_at?: string;
   currency: string;
   total: number;
   member: { member_number: string };
@@ -43,6 +49,9 @@ const eventText: Record<string, string> = {
   acknowledged: "Insurer acknowledged the claim",
   submitted: "Sent; waiting for the insurer",
   rejected: "Insurer rejected the claim",
+  approved: "Insurer approved the claim",
+  paid: "Insurer paid the claim",
+  queried: "Insurer asked a question",
   returned_to_ready: "Not sent; back to ready",
   validation_failed: "Stopped before sending: fix needed",
   reviewed: "Checked by a person",
@@ -62,7 +71,8 @@ export default async function ClaimPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [c, ev] = await Promise.all([
+  const [{ organization: org }, c, ev] = await Promise.all([
+    requireOrg(),
     api<Claim>(`/v1/claims/${encodeURIComponent(id)}`),
     api<{ data: ClaimEvent[] }>(`/v1/claims/${encodeURIComponent(id)}/events`),
   ]);
@@ -119,6 +129,15 @@ export default async function ClaimPage({
         resend={claim.state === "rejected"}
         sendKey={`send-${claim.id}-${events.length}`}
       />
+      {(claim.state === "acknowledged" || claim.state === "approved") && (
+        <WithInsurer
+          id={claim.id}
+          status={claim.payer_status}
+          message={claim.payer_message}
+          checkedAt={claim.status_checked_at}
+          canAsk={can(org.user.permissions, "claims")}
+        />
+      )}
       <div className="app-split app-split--wide">
         <section className="app-card" aria-labelledby="trail-h">
           <h2 id="trail-h" className="app-card__title">
@@ -126,11 +145,14 @@ export default async function ClaimPage({
           </h2>
           <ol className="app-trail">
             {events.map((e) => {
-              const err = (
-                e.detail as
-                  | { error?: { message?: string; payer_message?: string } }
-                  | undefined
-              )?.error;
+              const detail = e.detail as
+                | {
+                    error?: { message?: string; payer_message?: string };
+                    payer_message?: string;
+                  }
+                | undefined;
+              const err = detail?.error;
+              const said = !err && detail?.payer_message;
               return (
                 <li
                   key={e.id}
@@ -146,6 +168,11 @@ export default async function ClaimPage({
                     {err && (
                       <span className="app-muted app-block">
                         {err.payer_message || err.message}
+                      </span>
+                    )}
+                    {said && (
+                      <span className="app-muted app-block">
+                        &ldquo;{said}&rdquo;
                       </span>
                     )}
                   </span>

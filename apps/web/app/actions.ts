@@ -1273,3 +1273,22 @@ export async function checkMember(
     };
   return { check: res.data, values };
 }
+
+// askInsurer asks the insurer now where a claim stands and waits for the answer.
+export async function askInsurer(
+  _: FormState,
+  form: FormData,
+): Promise<FormState> {
+  const id = text(form, "id");
+  const res = await api(`/v1/claims/${encodeURIComponent(id)}/status-check`, {
+    method: "POST",
+    headers: { Prefer: "wait=20" },
+  });
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath(`/console/claims/${id}`);
+  return res.status === 202
+    ? {
+        ok: "The insurer has not answered yet; this page will show it when it does.",
+      }
+    : {};
+}

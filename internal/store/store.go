@@ -291,6 +291,11 @@ func SaveClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim, from claim.State,
 	if _, err := tx.Exec(ctx, `SELECT pg_notify('`+claimSavedChannel+`', $1)`, c.ID); err != nil {
 		return err
 	}
+	if from != c.State {
+		if err := scheduleStatusCheck(ctx, tx, c); err != nil {
+			return err
+		}
+	}
 	if c.Environment == "live" && c.State.Billable() && !from.Billable() {
 		if err := chargeClaim(ctx, tx, c); err != nil {
 			return err
