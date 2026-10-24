@@ -31,7 +31,9 @@ export type FormState = {
 // httpOnly cookie to the next page, which shows it until it is dismissed.
 import { NEW_KEY_COOKIE } from "@/lib/flash";
 
-const secure = process.env.NODE_ENV === "production";
+// Cookies are Secure in production. The local Docker stack serves plain http
+// on localhost, so it turns that off with PAYAHUB_INSECURE_COOKIES=1.
+const secure = process.env.NODE_ENV === "production" && process.env.PAYAHUB_INSECURE_COOKIES !== "1";
 
 async function setSession(token: string) {
   (await cookies()).set(SESSION_COOKIE, token, {
