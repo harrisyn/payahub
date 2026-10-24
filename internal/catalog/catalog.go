@@ -155,6 +155,7 @@ type Catalog struct {
 	byItem  map[string]Item
 	codes   map[string]map[string]PayerCode // payer -> item -> code, generated codes included
 	lists   map[string][]listed
+	brands  map[string][]string       // a medicine's one-word brand or other name -> its generic, tokenised
 	listed  map[string]map[string]int // payer -> code -> position in lists
 	index   []indexed
 }
@@ -227,6 +228,7 @@ func Build(d Data) (*Catalog, error) {
 		c.byItem[it.ID] = it
 		c.index = append(c.index, indexItem(it))
 	}
+	c.brands = brandsOf(c.items)
 	for _, p := range c.payers {
 		if _, dup := c.byPayer[p.ID]; dup || p.ID == "" || p.Connector == "" {
 			return nil, fmt.Errorf("payer %q is duplicated or has no connector", p.ID)

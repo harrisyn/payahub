@@ -245,7 +245,8 @@ export type CatalogChange = {
     | "payer_created"
     | "payer_updated"
     | "codes_changed"
-    | "list_loaded" | "rules_changed"
+    | "list_loaded"
+    | "rules_changed"
     | "seed";
   detail: Record<string, unknown>;
   changed_by: string;
@@ -533,5 +534,32 @@ export type MemberCheck = {
   result?: MemberVerification & { challenge?: string };
   error_code?: string;
   error_message?: string;
+  created_at: string;
+};
+
+export type AICheckCase = {
+  name: string;
+  want: string;
+  got: string;
+  confidence: number;
+  answered: boolean;
+};
+
+export type AICheckRun = {
+  id: number;
+  method: "words" | "model";
+  models: string;
+  prompt_version: string;
+  total: number;
+  passed: number;
+  groups: number;
+  groups_passed: number;
+  report: {
+    failures: AICheckCase[];
+    group_failures: { group: string; cases: string[]; got: string[] }[];
+    took_ms: number;
+    error?: string;
+  };
+  run_by: string;
   created_at: string;
 };

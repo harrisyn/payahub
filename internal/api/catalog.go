@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/connector"
@@ -169,6 +170,7 @@ func (s *Server) suggestItems(w http.ResponseWriter, r *http.Request) {
 			own[i] = assist.Own{Code: it.Code, Name: it.Name, Kind: it.Kind}
 		}
 		var err error
+		extendWrite(w, 2*time.Minute+10*time.Second)
 		if picks, err = s.modelPicks(r.Context(), orgFrom(r.Context()).ID, own); err != nil {
 			s.Logger.WarnContext(r.Context(), "model matching failed; using word matching", "err", err)
 			note = "The model could not answer, so these are word matches only."

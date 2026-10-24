@@ -65,7 +65,8 @@ each with contract tests against a recorded copy of the platform's API.
 - [ ] Model-backed standard item → payer code, and diagnosis text → ICD-10 beyond the word search
 - [x] Review queue (Claims, To review; `GET /v1/review-queue`): own codes holding unsent claims back, mapped once to
       recheck every claim waiting on them; model picks under the threshold and possible copies, confirmed with a note
-- [ ] Regression checks: a changed input must change the output; known pairs must keep their answer
+- [x] Regression checks: 63 clinic names with known answers (15 groups that differ only in strength or form
+      must each get a different item); run on word matching in every test run and on the model from AI models, with history
 - [x] Intake: spreadsheet upload of claims (CSV or Excel, one row per line, checked before saving,
       re-uploads create nothing new, ready claims can be sent straight away; template in the console)
 - [x] Intake: PDF and photo of a paper claim form, read by a model, every value checked (dates, amounts,

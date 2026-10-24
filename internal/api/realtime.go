@@ -23,6 +23,12 @@ import (
 const MaxWait = 60
 
 // waitFor reads the caller's wait, in seconds; 0 means do not wait.
+// extendWrite lets a handler that waits (for a payer, or a model) write its
+// answer after the server's usual write timeout: d from now.
+func extendWrite(w http.ResponseWriter, d time.Duration) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(d))
+}
+
 func waitFor(r *http.Request) int {
 	raw := r.URL.Query().Get("wait")
 	for _, pref := range strings.Split(r.Header.Get("Prefer"), ",") {
@@ -83,6 +89,7 @@ func outcomeOf(st store.Settled) Outcome {
 // settle waits up to seconds for the claim to settle and writes the answer:
 // 200 with the outcome, or 202 when the payer has not answered in time.
 func (s *Server) settle(w http.ResponseWriter, r *http.Request, c *claim.Claim, issues []engine.Issue, seconds int) {
+	extendWrite(w, time.Duration(seconds)*time.Second+10*time.Second)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(seconds)*time.Second)
 	defer cancel()
 	st, err := s.Store.WaitSettled(ctx, c.OrganizationID, c.ID)

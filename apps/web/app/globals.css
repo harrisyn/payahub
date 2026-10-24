@@ -553,6 +553,7 @@ label.app-issue input { margin-top: 4px; }
 @media (max-width: 720px) {
   .app-table--stack, .app-table--stack tbody, .app-table--stack tr, .app-table--stack td { display: block; width: 100%; }
   .app-table--stack thead { display: none; }
+  .app-table--stack caption { display: block; width: 100%; }
   .app-table--stack tr { border-top: 1px solid var(--rule); padding: 12px 0; }
   .app-table--stack td { border-top: 0; padding: 3px 0; }
   .app-table--stack td.app-right { text-align: left; padding-top: 10px; }
@@ -600,3 +601,4 @@ label.app-issue input { margin-top: 4px; }
 @media (max-width: 47.99em) {
   .app-held { grid-template-columns: 1fr; gap: 8px; }
 }
+.app-caption { caption-side: top; text-align: left; font-weight: 600; padding: 16px 0 4px; }

@@ -40,6 +40,7 @@ func (s *Server) statusCheck(w http.ResponseWriter, r *http.Request) {
 		wait = waitFor(r)
 	}
 	if wait > 0 {
+		extendWrite(w, time.Duration(wait)*time.Second+10*time.Second)
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(wait)*time.Second)
 		got, err := s.Store.WaitStatusChecked(ctx, org.ID, c.ID, since)
 		cancel()

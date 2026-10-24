@@ -125,6 +125,7 @@ func (s *Server) extractClaim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "no_model", "No model is set up to read documents yet. Enter the claim, or upload a spreadsheet.", nil)
 		return
 	}
+	extendWrite(w, 3*time.Minute+10*time.Second)
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 	org := orgFrom(r.Context())

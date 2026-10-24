@@ -1365,6 +1365,33 @@ paths:
       responses:
         "200": { description: The provider with check_ok and check_message set, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/operator/ai/checks:
+    get:
+      security: [{ session: [] }]
+      summary: The matching checks and their last 20 runs, newest first (operators only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AICheckRun" } }
+                  cases: { type: integer, description: How many known answers the checks hold }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      security: [{ session: [] }]
+      summary: Run the matching checks on word matching and, when a provider serves code_matching, on the model (operators only)
+      description: |
+        Each case is a clinic name with a known answer. Cases in one group differ only in strength or
+        form and must each get a different item. Every run is recorded with its models and prompt
+        version. The model run may take up to three minutes.
+      responses:
+        "200":
+          description: The runs just made, word matching first
+          content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/AICheckRun" } } } } } }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/operator/ledger:
     get:
       security: [{ session: [] }]
@@ -1745,6 +1772,23 @@ components:
         bank_name: { type: string }
         account_number: { type: string }
         currency: { type: string }
+    AICheckRun:
+      type: object
+      properties:
+        id: { type: integer }
+        task: { type: string, enum: [code_matching] }
+        method: { type: string, enum: [words, model] }
+        models: { type: string, description: The models that answered, comma separated; empty for word matching }
+        prompt_version: { type: string }
+        total: { type: integer }
+        passed: { type: integer }
+        groups: { type: integer }
+        groups_passed: { type: integer }
+        report:
+          type: object
+          description: The whole run, with each failed case (name, want, got, confidence) and each group not told apart
+        run_by: { type: string }
+        created_at: { type: string, format: date-time }
     AIProvider:
       type: object
       properties:

@@ -931,6 +931,13 @@ export async function saveAIProvider(
   redirect(`/console/operator/ai?saved=${encodeURIComponent(res.data.id)}`);
 }
 
+// runAIChecks runs the matching regression checks on word matching and on
+// the models set up for it.
+export async function runAIChecks() {
+  await api("/v1/operator/ai/checks", { method: "POST" });
+  revalidatePath("/console/operator/ai");
+}
+
 export async function checkAIProvider(form: FormData) {
   await api(
     `/v1/operator/ai-providers/${encodeURIComponent(text(form, "id"))}/check`,

@@ -105,6 +105,7 @@ func (s *Server) answerMemberCheck(w http.ResponseWriter, r *http.Request, m sto
 		wait = waitFor(r)
 	}
 	if m.Status == "pending" && wait > 0 {
+		extendWrite(w, time.Duration(wait)*time.Second+10*time.Second)
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(wait)*time.Second)
 		got, err := s.Store.WaitMemberCheck(ctx, m.OrganizationID, m.ID)
 		cancel()
