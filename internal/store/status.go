@@ -87,7 +87,7 @@ func StatusAsked(ctx context.Context, tx pgx.Tx, c *claim.Claim, acknowledgedAt 
 	if _, err := tx.Exec(ctx, `UPDATE claims SET status_check_at = $2 WHERE id = $1`, c.ID, next); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `SELECT pg_notify('`+claimSavedChannel+`', $1)`, c.ID)
+	_, err = tx.Exec(ctx, notifyWaiters, c.ID)
 	return err
 }
 
@@ -105,9 +105,11 @@ func AcknowledgedAt(ctx context.Context, q Querier, c *claim.Claim) (time.Time, 
 // WaitStatusChecked waits until the claim has been asked about after since,
 // or ctx ends.
 func (s *Store) WaitStatusChecked(ctx context.Context, orgID, id string, since time.Time) (*claim.Claim, error) {
-	s.ListenForClaims()
-	ch := s.wait.add(id)
-	defer s.wait.remove(id, ch)
+	ch, release, err := s.watch(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	poll := time.NewTicker(2 * time.Second)
 	defer poll.Stop()
 	for {

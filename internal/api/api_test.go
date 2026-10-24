@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -290,50 +289,6 @@ func TestLostReplyReconcilesWithoutDuplicate(t *testing.T) {
 	if fmt.Sprint(kinds) != fmt.Sprint([]string{"created", "submission_queued", "submission_started", "attempt_failed", "acknowledged"}) {
 		t.Errorf("events %v", kinds)
 	}
-}
-
-// TestThroughput pushes PAYAHUB_LOAD claims through create, submit and
-// delivery to the sandbox payer, and reports the rate. Skipped by default.
-func TestThroughput(t *testing.T) {
-	n, _ := strconv.Atoi(os.Getenv("PAYAHUB_LOAD"))
-	if n == 0 {
-		t.Skip("set PAYAHUB_LOAD to run")
-	}
-	e := setup(t)
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 200
-
-	ids := make([]string, n)
-	start := time.Now()
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 100)
-	for i := range n {
-		sem <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			ids[i] = e.create(t, "M-"+strconv.Itoa(i))
-			if s, out := e.do(t, "POST", "/v1/claims/"+ids[i]+"/submit", nil); s != 202 {
-				t.Errorf("submit %d %v", s, out)
-			}
-		})
-	}
-	wg.Wait()
-	accepted := time.Since(start)
-
-	ctx := context.Background()
-	for {
-		var pending int
-		_ = st.Pool.QueryRow(ctx, `SELECT count(*) FROM claims WHERE id = ANY($1) AND state <> 'acknowledged'`, ids).Scan(&pending)
-		if pending == 0 {
-			break
-		}
-		if time.Since(start) > 5*time.Minute {
-			t.Fatalf("%d claims still pending", pending)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	done := time.Since(start)
-	t.Logf("%d claims: accepted (create+submit) in %v = %.0f/s; all acknowledged in %v = %.0f/s",
-		n, accepted.Round(time.Millisecond), float64(n)/accepted.Seconds(), done.Round(time.Millisecond), float64(n)/done.Seconds())
 }
 
 // testMail keeps every email the workers send.

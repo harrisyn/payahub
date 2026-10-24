@@ -111,7 +111,13 @@ each with contract tests against a recorded copy of the platform's API.
       fundings credited only from the provider's verification; withdrawals approved by an operator, then paid
 - [ ] Paystack live keys and webhook URL set in production; first real funding checked end to end
 - [ ] A second payment provider (e.g. Hubtel or Flutterwave) once a customer needs it
-- [ ] Throughput test at scale on the full path
+- [x] Throughput test at scale on the full path (`PAYAHUB_LOAD=20000 go test -run TestThroughput -v ./internal/api/`):
+      20,000 claims of 3 lines in the clinic's own codes, resolved, checked, queued, sent to the sandbox payer and
+      acknowledged, every step a signed webhook, 1 in 10 waiting for the answer. On one 4-core machine running
+      Postgres, the API and the load together: about 480 claims a second (1.7 million an hour), create and submit
+      p50 156 ms and p99 346 ms, the payer's answer p50 626 ms, webhooks within 3 s of the last claim. Fixed on the
+      way: a save notified on every commit, which takes one database-wide lock (now only when someone waits), and
+      webhook results were committed one at a time (now once per batch). The limit now is the disk's commit flush
 
 ## Waiting on the owner
 

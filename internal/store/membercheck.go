@@ -99,7 +99,7 @@ func (s *Store) FinishMemberCheck(ctx context.Context, id string, result any, co
 		WHERE id = $1 AND status = 'pending'`, id, status, body, code, message); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_notify($1, $2)`, claimSavedChannel, id); err != nil {
+	if _, err := tx.Exec(ctx, notifyWaiters, id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -107,9 +107,11 @@ func (s *Store) FinishMemberCheck(ctx context.Context, id string, result any, co
 
 // WaitMemberCheck waits until the check has an answer or ctx ends.
 func (s *Store) WaitMemberCheck(ctx context.Context, orgID, id string) (MemberCheck, error) {
-	s.ListenForClaims()
-	ch := s.wait.add(id)
-	defer s.wait.remove(id, ch)
+	ch, release, err := s.watch(ctx, id)
+	if err != nil {
+		return MemberCheck{}, err
+	}
+	defer release()
 	poll := time.NewTicker(2 * time.Second)
 	defer poll.Stop()
 	for {

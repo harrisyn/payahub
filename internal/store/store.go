@@ -296,7 +296,7 @@ func SaveClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim, from claim.State,
 		return err
 	}
 	// Delivered on commit, to requests waiting for this claim to settle.
-	if _, err := tx.Exec(ctx, `SELECT pg_notify('`+claimSavedChannel+`', $1)`, c.ID); err != nil {
+	if _, err := tx.Exec(ctx, notifyWaiters, c.ID); err != nil {
 		return err
 	}
 	if from != c.State {

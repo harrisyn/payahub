@@ -175,48 +175,51 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	}
 }
 
-// Once sends one batch of due deliveries, 16 at a time.
+// Once sends one batch of due deliveries, 16 at a time, and records the
+// results together. A dispatcher that stops before recording them leaves the
+// batch to be sent again when its lease ends: deliveries are at least once,
+// and receivers tell repeats apart by webhook-id.
 func (d *Dispatcher) Once(ctx context.Context, batch int) (int, error) {
 	due, err := d.Store.LeaseDeliveries(ctx, batch, lease)
 	if err != nil || len(due) == 0 {
 		return 0, err
 	}
+	done := make([]store.Attempt, len(due))
 	sem := make(chan struct{}, 16)
 	var wg sync.WaitGroup
-	for _, dl := range due {
+	for i, dl := range due {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			d.send(ctx, dl)
+			done[i] = d.send(ctx, dl)
 		}()
 	}
 	wg.Wait()
+	// The results are recorded even if the dispatcher is stopping.
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := d.Store.DeliveriesDone(rctx, done); err != nil {
+		return len(due), fmt.Errorf("recording webhook deliveries: %w", err)
+	}
 	return len(due), nil
 }
 
-func (d *Dispatcher) send(ctx context.Context, dl store.Delivery) {
+func (d *Dispatcher) send(ctx context.Context, dl store.Delivery) store.Attempt {
 	status, err := d.post(ctx, dl)
-	ok := err == nil && status >= 200 && status < 300
-	var next time.Time
-	msg := ""
-	if !ok {
+	a := store.Attempt{ID: dl.ID, Status: status, Delivered: err == nil && status >= 200 && status < 300}
+	if !a.Delivered {
 		if err != nil {
-			msg = err.Error()
+			a.Err = err.Error()
 		} else {
-			msg = "the endpoint answered HTTP " + strconv.Itoa(status)
+			a.Err = "the endpoint answered HTTP " + strconv.Itoa(status)
 		}
 		if dl.Attempts < MaxAttempts {
-			next = time.Now().Add(backoff(dl.Attempts))
+			a.Next = time.Now().Add(backoff(dl.Attempts))
 		}
 	}
-	// The result is recorded even if the dispatcher is stopping.
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := d.Store.DeliveryDone(rctx, dl.ID, status, msg, ok, next); err != nil {
-		d.Logger.Error("recording a webhook delivery", "id", dl.ID, "err", err)
-	}
+	return a
 }
 
 func (d *Dispatcher) post(ctx context.Context, dl store.Delivery) (int, error) {

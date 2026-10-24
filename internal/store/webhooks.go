@@ -108,24 +108,46 @@ func (s *Store) LeaseDeliveries(ctx context.Context, n int, lease time.Duration)
 	})
 }
 
-// DeliveryDone records an attempt: delivered, retried at next, or (with a
-// zero next) given up.
-func (s *Store) DeliveryDone(ctx context.Context, id int64, status int, errText string, delivered bool, next time.Time) error {
-	if len(errText) > 300 {
-		errText = errText[:300]
+// Attempt is the result of sending one delivery: delivered, retried at
+// Next, or (with a zero Next) given up.
+type Attempt struct {
+	ID        int64
+	Status    int
+	Err       string
+	Delivered bool
+	Next      time.Time
+}
+
+// DeliveriesDone records a batch of attempts in one statement, so a busy
+// dispatcher commits once per batch rather than once per delivery.
+func (s *Store) DeliveriesDone(ctx context.Context, done []Attempt) error {
+	if len(done) == 0 {
+		return nil
 	}
-	var err error
-	switch {
-	case delivered:
-		_, err = s.Pool.Exec(ctx, `UPDATE webhook_deliveries SET status = 'delivered', delivered_at = now(),
-			last_status = $2, last_error = '' WHERE id = $1`, id, status)
-	case next.IsZero():
-		_, err = s.Pool.Exec(ctx, `UPDATE webhook_deliveries SET status = 'failed', last_status = NULLIF($2, 0),
-			last_error = $3 WHERE id = $1`, id, status, errText)
-	default:
-		_, err = s.Pool.Exec(ctx, `UPDATE webhook_deliveries SET next_attempt_at = $4, last_status = NULLIF($2, 0),
-			last_error = $3 WHERE id = $1`, id, status, errText, next)
+	ids := make([]int64, len(done))
+	statuses := make([]int32, len(done))
+	errs := make([]string, len(done))
+	delivered := make([]bool, len(done))
+	next := make([]*time.Time, len(done))
+	for i, a := range done {
+		ids[i], statuses[i], delivered[i] = a.ID, int32(a.Status), a.Delivered
+		errs[i] = a.Err
+		if len(errs[i]) > 300 {
+			errs[i] = errs[i][:300]
+		}
+		if !a.Next.IsZero() {
+			next[i] = &a.Next
+		}
 	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE webhook_deliveries d SET
+			status = CASE WHEN r.delivered THEN 'delivered' WHEN r.next IS NULL THEN 'failed' ELSE d.status END,
+			delivered_at = CASE WHEN r.delivered THEN now() ELSE d.delivered_at END,
+			last_status = NULLIF(r.status, 0),
+			last_error = CASE WHEN r.delivered THEN '' ELSE r.err END,
+			next_attempt_at = CASE WHEN NOT r.delivered AND r.next IS NOT NULL THEN r.next ELSE d.next_attempt_at END
+		FROM unnest($1::bigint[], $2::int[], $3::text[], $4::bool[], $5::timestamptz[]) AS r(id, status, err, delivered, next)
+		WHERE d.id = r.id`, ids, statuses, errs, delivered, next)
 	return err
 }
 

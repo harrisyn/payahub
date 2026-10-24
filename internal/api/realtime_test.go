@@ -45,7 +45,18 @@ func TestSubmitAndWaitForThePayer(t *testing.T) {
 	if s, out := e.do(t, "POST", "/v1/claims/"+saved+"/submit", nil, "Prefer", "wait=20"); s != 200 || out["outcome"].(map[string]any)["state"] != "acknowledged" {
 		t.Fatalf("submit and wait: %d %v", s, out)
 	}
-	t.Logf("a saved claim answered in %s", time.Since(start).Round(time.Millisecond))
+	took := time.Since(start)
+	t.Logf("a saved claim answered in %s", took.Round(time.Millisecond))
+	// The waiter was woken by the save's notification, not the 2 s poll, and
+	// left nothing behind.
+	if took > 1500*time.Millisecond {
+		t.Errorf("the wait was not woken by the save: %s", took)
+	}
+	var left int
+	_ = st.Pool.QueryRow(t.Context(), `SELECT count(*) FROM claim_waits WHERE id = $1`, saved).Scan(&left)
+	if left != 0 {
+		t.Errorf("%d waits left behind", left)
+	}
 
 	// A payer slower than the wait: 202, and the claim still arrives.
 	s, out = e.do(t, "POST", "/v1/claims?submit=true&wait=1", claimBody("SLOW-RT"))
