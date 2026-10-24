@@ -574,3 +574,5 @@ label.app-issue input { margin-top: 4px; }
 .app-inline-form__env { width: 170px; }
 .app-member-controls__role { width: 150px; }
 .app-inline-form__show { width: 240px; }
+.app-measure-card { max-width: 760px; }
+.app-form__row--wide { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }

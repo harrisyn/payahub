@@ -675,6 +675,45 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/member-checks:
+    post:
+      summary: Ask the insurer whether a member is covered, or to text the member a code
+      description: |
+        Waits up to 20 seconds for the insurer's answer by default (or the caller's `Prefer: wait=N`,
+        up to 60) and answers 200 with the check. If the insurer is slower it answers 202 with a
+        `Location` to read later. The insurer call runs on a worker, which alone opens the
+        organisation's insurer credentials. A code the member gives (`otp`) is sealed on its way to
+        the worker and never stored readable. Some insurers answer `otp_required`: send the member a
+        code with `action: send_otp`, then check again with `otp`. In the sandbox, member numbers
+        starting NOTFOUND, INACTIVE or OTP give those answers, and the code is 123456.
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - { name: Prefer, in: header, schema: { type: string, example: "wait=20" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payer_id, member_number]
+              properties:
+                payer_id: { type: string, example: sandbox }
+                member_number: { type: string, maxLength: 64 }
+                otp: { type: string, maxLength: 16 }
+                action: { enum: [verify, send_otp], default: verify }
+                environment: { enum: [sandbox, live], description: Session only; a key uses its own }
+      responses:
+        "200": { description: Answered, content: { application/json: { schema: { $ref: "#/components/schemas/MemberCheck" } } } }
+        "202": { description: The insurer has not answered yet, content: { application/json: { schema: { $ref: "#/components/schemas/MemberCheck" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/member-checks/{id}:
+    get:
+      summary: Read a member check, waiting like the POST if it is still pending
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Answered, content: { application/json: { schema: { $ref: "#/components/schemas/MemberCheck" } } } }
+        "202": { description: Still waiting on the insurer }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/members:
     get:
       summary: List the organisation's members and open invitations (console session)
@@ -1757,6 +1796,31 @@ components:
             total: { type: integer, description: Minor units }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
+    MemberCheck:
+      type: object
+      properties:
+        id: { type: string }
+        environment: { enum: [sandbox, live] }
+        payer_id: { type: string }
+        member_number: { type: string }
+        action: { enum: [verify, send_otp] }
+        status: { enum: [pending, done, failed], description: "failed: the insurer gave an error, in error_code" }
+        result:
+          type: object
+          description: For verify, the insurer's answer; for send_otp, a challenge message.
+          properties:
+            eligible: { type: boolean }
+            member: { type: object }
+            plan_name: { type: string }
+            otp_required: { type: boolean }
+            reason: { type: string, description: "inactive, not_covered_here, expired" }
+            message: { type: string, description: The insurer's own words }
+            cover_ends: { type: string, format: date }
+            challenge: { type: string }
+        error_code: { type: string, example: member_not_found }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
     Role:
       type: string
       enum: [owner, admin, claims, finance, developer, viewer]

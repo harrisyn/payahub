@@ -64,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	s.assistRoutes(mux)
 	s.webhookRoutes(mux)
 	s.teamRoutes(mux)
+	s.memberCheckRoutes(mux)
 	return mux
 }
 

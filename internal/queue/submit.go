@@ -55,6 +55,7 @@ func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger
 	ws := river.NewWorkers()
 	river.AddWorker(ws, &EmailWorker{Sender: mailer})
 	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
+	river.AddWorker(ws, &MemberCheckWorker{Store: st, Vault: v})
 	river.AddWorker(ws, &PayoutWorker{Store: st})
 	river.AddWorker(ws, &BillingWorker{Store: st, Logger: logger})
 	// A caller may be waiting on the payer's answer (submit and wait), so a

@@ -12,7 +12,8 @@ import (
 	"github.com/harrisyn/payahub/internal/claim"
 )
 
-// Waiting for a claim to settle: SaveClaim sends a claim_saved notification
+// Waiting for a claim to settle (or a member check to answer): SaveClaim and
+// FinishMemberCheck send a claim_saved notification with the id
 // on commit, one listening connection per process passes it to whoever is
 // waiting on that claim, and a slow poll covers a lost notification or a
 // dropped connection. Nothing holds a transaction while it waits.

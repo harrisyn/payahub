@@ -6,7 +6,8 @@
 // The member number picks the path:
 //
 //	NOTFOUND...   member_not_found
-//	OTP...        verification needs OTP 123456
+//	OTP...        verification needs OTP 123456, which SendOTP "sends"
+//	INACTIVE...   found, but the cover has lapsed
 //	REJECT...     the payer refuses the claim
 //	FLAKY...      the first send times out before reaching the payer
 //	LOSTREPLY...  the first send reaches the payer but the reply is lost
@@ -42,7 +43,7 @@ var manifest = connector.Manifest{
 	Country: "ZZ",
 	Channel: connector.ChannelAPI,
 	Verbs: []connector.Verb{
-		connector.VerifyMember, connector.SubmitWholeClaim, connector.OpenClaim, connector.AddLine,
+		connector.VerifyMember, connector.SendOTP, connector.ValidateOTP, connector.SubmitWholeClaim, connector.OpenClaim, connector.AddLine,
 		connector.UpdateLine, connector.DeleteLine, connector.AddDiagnosis, connector.DeleteDiagnosis,
 		connector.FinalizeClaim, connector.FindClaim, connector.FetchClaim,
 	},
@@ -116,11 +117,36 @@ func (Sandbox) VerifyMember(_ context.Context, memberNumber, otp string) (connec
 	if strings.HasPrefix(upper, "OTP") && otp != OTP {
 		return connector.MemberVerification{Member: claim.Member{MemberNumber: memberNumber}, OTPRequired: true}, nil
 	}
+	if strings.HasPrefix(upper, "INACTIVE") {
+		ended := claim.Date{Time: time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)}
+		return connector.MemberVerification{
+			Member:    claim.Member{MemberNumber: memberNumber, FirstName: "Kojo", LastName: "Asante"},
+			PlanName:  "Sandbox Silver",
+			Reason:    "inactive",
+			Message:   "Cover ended 30 June 2026.",
+			CoverEnds: &ended,
+		}, nil
+	}
 	return connector.MemberVerification{
 		Eligible: true,
 		Member:   claim.Member{MemberNumber: memberNumber, FirstName: "Ama", LastName: "Mensah"},
 		PlanName: "Sandbox Gold",
 	}, nil
+}
+
+// SendOTP pretends to text the member the sandbox code.
+func (Sandbox) SendOTP(_ context.Context, memberNumber string) (string, error) {
+	if strings.HasPrefix(strings.ToUpper(memberNumber), "NOTFOUND") {
+		return "", connector.Errorf(connector.MemberNotFound, "no member %s", memberNumber)
+	}
+	return "A code was sent to the member's phone. In the sandbox it is " + OTP + ".", nil
+}
+
+func (Sandbox) ValidateOTP(_ context.Context, _, otp string) error {
+	if otp != OTP {
+		return connector.Errorf(connector.OTPRequired, "that code is not right")
+	}
+	return nil
 }
 
 // SlowFor is how long a SLOW member's payer takes to answer.

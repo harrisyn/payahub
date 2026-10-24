@@ -50,6 +50,9 @@ export default async function Claims({
           </p>
         </div>
         <div className="app-actions">
+          <Link href="/console/claims/member" className="app-button">
+            Check a member
+          </Link>
           <Link href="/console/claims/read" className="app-button">
             Read a claim form
           </Link>

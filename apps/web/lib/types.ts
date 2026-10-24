@@ -380,3 +380,26 @@ export type InvitationView = {
   invited_by: string;
   expires_at: string;
 };
+
+export type MemberVerification = {
+  eligible: boolean;
+  member: { member_number: string; first_name?: string; last_name?: string };
+  plan_name?: string;
+  otp_required: boolean;
+  reason?: string;
+  message?: string;
+  cover_ends?: string;
+};
+
+export type MemberCheck = {
+  id: string;
+  environment: "sandbox" | "live";
+  payer_id: string;
+  member_number: string;
+  action: "verify" | "send_otp";
+  status: "pending" | "done" | "failed";
+  result?: MemberVerification & { challenge?: string };
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+};

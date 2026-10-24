@@ -48,7 +48,7 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] RX Insurance (8: 012/013, expired claims reopened with a new HMS number, no benefit, authorisation)
 - [x] ClaimIQ (7: whole claim plus batch of one, line by line, idempotent retries)
 - [ ] Live check of each against the real platform (blocked: needs test accounts)
-- [ ] Member check and OTP in the console and the API
+- [x] Member check and OTP in the console and the API: `POST /v1/member-checks` waits for the answer; the code is sealed on its way to the worker
 - [ ] Claim status from the payer after sending (accepted, queried, paid, rejected with reason)
 
 ## 4. AI translation and matching
