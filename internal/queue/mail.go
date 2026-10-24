@@ -9,6 +9,7 @@ import (
 
 	"github.com/riverqueue/river"
 
+	"github.com/harrisyn/payahub/internal/access"
 	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/store"
 )
@@ -110,4 +111,44 @@ func firstOf(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// Invite records an invitation and queues its email in one transaction.
+func Invite(ctx context.Context, st *store.Store, rc *Client, in store.NewInvitation, consoleURL string) (store.Invitation, error) {
+	tx, err := st.Pool.Begin(ctx)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	defer tx.Rollback(ctx)
+	inv, token, orgName, err := store.CreateInvitation(ctx, tx, in)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	if _, err := rc.InsertTx(ctx, tx, EmailArgs{InvitationEmail(inv, orgName, token, consoleURL)}, nil); err != nil {
+		return store.Invitation{}, err
+	}
+	return inv, tx.Commit(ctx)
+}
+
+var roleText = map[access.Role]string{
+	access.Owner:     "an owner",
+	access.Admin:     "an admin",
+	access.Claims:    "claims staff",
+	access.Finance:   "finance",
+	access.Developer: "a developer",
+	access.Viewer:    "a viewer",
+}
+
+// InvitationEmail is the email that carries an invitation link.
+func InvitationEmail(inv store.Invitation, orgName, token, consoleURL string) mail.Message {
+	var b strings.Builder
+	greet := "Hello"
+	if inv.Name != "" {
+		greet += " " + inv.Name
+	}
+	fmt.Fprintf(&b, "%s,\n\n%s has invited you to join %s on Payahub as %s.\n\n", greet, inv.InvitedBy, orgName, roleText[inv.Role])
+	fmt.Fprintf(&b, "Accept the invitation and choose your password here:\n%s/join/%s\n\n", strings.TrimRight(consoleURL, "/"), token)
+	fmt.Fprintf(&b, "The link works once and expires on %s. If you were not expecting this, you can ignore it.\n", inv.ExpiresAt.Format("2 January 2006"))
+	subject := strings.Join(strings.Fields("Join "+orgName+" on Payahub"), " ")
+	return mail.Message{To: []string{inv.Email}, Subject: subject, Text: b.String()}
 }

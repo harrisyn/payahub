@@ -80,8 +80,8 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 	if addr, err := mail.ParseAddress(in.Email); err != nil || addr.Address != in.Email {
 		problems["email"] = "Enter a work email like you@clinic.com."
 	}
-	if utf8.RuneCountInString(in.Password) < 10 {
-		problems["password"] = "Use at least 10 characters."
+	if msg := passwordProblem(in.Password); msg != "" {
+		problems["password"] = msg
 	}
 	if in.Name == "" {
 		problems["name"] = "Enter your name."
@@ -124,6 +124,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusCreated, map[string]string{"session_token": token})
 	}
+}
+
+// passwordProblem says what is wrong with a new password, or nothing.
+func passwordProblem(p string) string {
+	switch n := utf8.RuneCountInString(p); {
+	case n < 10:
+		return "Use at least 10 characters."
+	case len(p) > 1024:
+		return "Use at most 1024 characters."
+	}
+	return ""
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

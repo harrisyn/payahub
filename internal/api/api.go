@@ -63,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	s.aiRoutes(mux)
 	s.assistRoutes(mux)
 	s.webhookRoutes(mux)
+	s.teamRoutes(mux)
 	return mux
 }
 
@@ -105,6 +106,10 @@ func (s *Server) auth(next http.HandlerFunc) http.Handler {
 		}
 		if err != nil {
 			s.internal(w, r, err)
+			return
+		}
+		if !permitted(org, r) {
+			forbidden(w, r)
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, org)))

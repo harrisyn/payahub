@@ -559,3 +559,16 @@ label.app-issue input { margin-top: 4px; }
   .app-table--stack td { border-top: 0; padding: 3px 0; }
   .app-table--stack td.app-right { text-align: left; padding-top: 10px; }
 }
+
+/* Team */
+.app-member-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+.app-member-controls form { flex-wrap: nowrap; }
+.app-table td .app-member-controls select { width: auto; min-width: 130px; min-height: 36px; padding: 0 10px; border: 1px solid #E6E1EF; border-radius: 8px; background: #fff; font: inherit; font-size: 14px; color: inherit; }
+.app-member-controls__msg { flex-basis: 100%; text-align: right; margin: 0; }
+.app-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px 24px; margin: 16px 0 0; }
+.app-roles dt { font-weight: 600; }
+.app-roles dd { margin: 2px 0 0; color: var(--a-muted); }
+@media (max-width: 720px) {
+  .app-member-controls { justify-content: flex-start; }
+  .app-member-controls__msg { text-align: left; }
+}

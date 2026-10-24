@@ -675,6 +675,118 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/members:
+    get:
+      summary: List the organisation's members and open invitations (console session)
+      description: |
+        Every member reads everything in the organisation. Writes from a console session need the
+        member's role to allow them, or the answer is 403 not_permitted: claims (claims, claim forms),
+        setup (profile, insurer settings and accounts, price list, mappings), billing (plan, wallet,
+        payouts, withdrawals), developers (API keys, webhooks) and team (members, invitations).
+        Owners and admins hold all five; only an owner adds, changes or removes an owner. Claims staff
+        hold claims; finance holds billing; developers hold developers and setup; viewers hold none.
+        API keys are not members and act for the whole organisation in their environment.
+      responses:
+        "200":
+          description: Members, invitations and the roles that exist
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Member" } }
+                  invitations: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+                  roles: { type: array, items: { $ref: "#/components/schemas/Role" } }
+  /v1/members/{id}:
+    put:
+      summary: Change a member's role (team)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [role], properties: { role: { $ref: "#/components/schemas/Role" } } }
+      responses:
+        "204": { description: Changed. It takes effect on the member's next request. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "last_owner: the organisation keeps at least one owner" }
+    delete:
+      summary: Remove a member (team); their sessions end at once
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "last_owner" }
+  /v1/invitations:
+    post:
+      summary: Invite someone by email (team)
+      description: |
+        Emails a link that works once, for 7 days. Inviting the same address again replaces the
+        earlier link. Someone removed earlier comes back as the same member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string, maxLength: 120 }
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "201": { description: Sent, content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "already_member, or email_taken by another organisation" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/invitations/{id}:
+    delete:
+      summary: Withdraw an open invitation (team)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Withdrawn }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/invitations/accept/{token}:
+    parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+    get:
+      summary: Show an invitation from its link (no authentication)
+      security: []
+      responses:
+        "200":
+          description: The invitation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization: { type: string }
+                  email: { type: string }
+                  name: { type: string }
+                  role: { $ref: "#/components/schemas/Role" }
+                  invited_by: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "404": { description: Expired, withdrawn or already used }
+    post:
+      summary: Accept an invitation and sign in (no authentication)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password]
+              properties:
+                name: { type: string }
+                password: { type: string, minLength: 10 }
+      responses:
+        "201":
+          description: Joined and signed in
+          content: { application/json: { schema: { type: object, properties: { session_token: { type: string } } } } }
+        "404": { description: Expired, withdrawn or already used }
+        "422": { $ref: "#/components/responses/Error" }
   /v1/webhook-endpoints:
     post:
       summary: Add an endpoint that hears about every claim event
@@ -1645,6 +1757,27 @@ components:
             total: { type: integer, description: Minor units }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
+    Role:
+      type: string
+      enum: [owner, admin, claims, finance, developer, viewer]
+    Member:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        created_at: { type: string, format: date-time }
+    Invitation:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        invited_by: { type: string, description: The inviter's name }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
     WebhookEndpoint:
       type: object
       properties:

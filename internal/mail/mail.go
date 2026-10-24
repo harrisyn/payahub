@@ -118,14 +118,23 @@ func Compose(from string, m Message, at time.Time) []byte {
 
 // Log writes messages to the log instead of sending them: the default when
 // no mail server is set up (development, tests).
-type Log struct{ Logger *slog.Logger }
+type Log struct {
+	Logger *slog.Logger
+	// Body logs the text as well, for development only: an invitation's
+	// text carries its link.
+	Body bool
+}
 
 func (l Log) Send(ctx context.Context, m Message) error {
 	if err := Check(m); err != nil {
 		return err
 	}
 	if l.Logger != nil {
-		l.Logger.InfoContext(ctx, "email not sent: no mail server is set up", "to", m.To, "subject", m.Subject)
+		args := []any{"to", m.To, "subject", m.Subject}
+		if l.Body {
+			args = append(args, "text", m.Text)
+		}
+		l.Logger.InfoContext(ctx, "email not sent: no mail server is set up", args...)
 	}
 	return nil
 }

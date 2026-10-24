@@ -106,6 +106,9 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if consoleURL() == "" && cmd != "worker" {
+		logger.Warn("PAYAHUB_CONSOLE_URL is not set: links in invitation emails will not work")
+	}
 	go st.WatchCatalog(ctx, 5*time.Second, func(err error) { logger.Warn("catalogue refresh failed", "err", err) })
 	switch cmd {
 	case "api":
@@ -133,7 +136,7 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 func mailerFrom(logger *slog.Logger) (mail.Sender, error) {
 	raw := os.Getenv("PAYAHUB_SMTP_URL")
 	if raw == "" {
-		return mail.Log{Logger: logger}, nil
+		return mail.Log{Logger: logger, Body: devMode()}, nil
 	}
 	m, err := mail.FromURL(raw, env("PAYAHUB_MAIL_FROM", "no-reply@payahub.com"))
 	if err != nil {
@@ -145,7 +148,17 @@ func mailerFrom(logger *slog.Logger) (mail.Sender, error) {
 // privateWebhooks lets webhooks go to http and internal addresses, for
 // development: PAYAHUB_WEBHOOKS_ALLOW_PRIVATE=1, or the dev command.
 func privateWebhooks() bool {
-	return os.Getenv("PAYAHUB_WEBHOOKS_ALLOW_PRIVATE") == "1" || (len(os.Args) > 1 && os.Args[1] == "dev")
+	return os.Getenv("PAYAHUB_WEBHOOKS_ALLOW_PRIVATE") == "1" || devMode()
+}
+
+func devMode() bool { return len(os.Args) > 1 && os.Args[1] == "dev" }
+
+// consoleURL is the web app's address, for links in email.
+func consoleURL() string {
+	if devMode() {
+		return env("PAYAHUB_CONSOLE_URL", "http://localhost:3000")
+	}
+	return os.Getenv("PAYAHUB_CONSOLE_URL")
 }
 
 func dispatcher(st *store.Store, v *vault.Vault, logger *slog.Logger) *webhook.Dispatcher {
@@ -181,7 +194,7 @@ func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, lo
 	}
 	srv := &http.Server{
 		Addr: env("PAYAHUB_ADDR", ":8080"),
-		Handler: (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, ConsoleURL: os.Getenv("PAYAHUB_CONSOLE_URL"),
+		Handler: (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, ConsoleURL: consoleURL(),
 			AllowPrivateWebhooks: privateWebhooks()}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

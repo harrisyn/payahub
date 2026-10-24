@@ -25,6 +25,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 
+	"github.com/harrisyn/payahub/internal/access"
 	"github.com/harrisyn/payahub/internal/claim"
 )
 
@@ -40,7 +41,7 @@ var (
 type Store struct {
 	Pool *pgxpool.Pool
 
-	// keys caches API key and session lookups for keyTTL, so a revoked key
+	// keys caches API key lookups for keyTTL, so a revoked key
 	// stops working within that window without a database read per request.
 	keys sync.Map // sha256 string -> cachedKey
 
@@ -124,6 +125,8 @@ type Org struct {
 	UserID      string
 	// Operator users run Payahub itself: they edit the shared catalogue.
 	Operator bool
+	// Role is a console member's job; empty for an API key.
+	Role access.Role
 }
 
 // Authenticate resolves an API key or a console session token.
@@ -144,7 +147,9 @@ func (s *Store) Authenticate(ctx context.Context, raw string) (Org, error) {
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrUnauthenticated) {
 		return Org{}, ErrUnauthenticated
 	}
-	if err == nil {
+	// Sessions are not cached, so a member's new role or removal takes
+	// effect on their next request.
+	if err == nil && !o.Session {
 		s.keys.Store(string(h), cachedKey{org: o, expires: time.Now().Add(keyTTL)})
 	}
 	return o, err

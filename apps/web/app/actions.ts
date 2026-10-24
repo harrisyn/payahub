@@ -811,3 +811,44 @@ export async function removeWebhook(form: FormData) {
   await api(`/v1/webhook-endpoints/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
   revalidatePath("/console/developers");
 }
+
+// inviteMember emails an invitation link.
+export async function inviteMember(_: FormState, form: FormData): Promise<FormState> {
+  const values = { email: text(form, "email"), name: text(form, "name"), role: text(form, "role") };
+  const res = await api<{ email: string }>("/v1/invitations", { method: "POST", body: values });
+  if (!res.ok) return { error: res.error.message, fields: res.error.details as Record<string, string> | undefined, values };
+  revalidatePath("/console/team");
+  return { ok: `Invitation sent to ${res.data.email}. The link works for 7 days.` };
+}
+
+export async function changeRole(_: FormState, form: FormData): Promise<FormState> {
+  const res = await api(`/v1/members/${encodeURIComponent(text(form, "id"))}`, { method: "PUT", body: { role: text(form, "role") } });
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console", "layout");
+  return { ok: "Saved" };
+}
+
+export async function removeMember(_: FormState, form: FormData): Promise<FormState> {
+  const res = await api(`/v1/members/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath("/console/team");
+  return {};
+}
+
+export async function revokeInvitation(form: FormData) {
+  await api(`/v1/invitations/${encodeURIComponent(text(form, "id"))}`, { method: "DELETE" });
+  revalidatePath("/console/team");
+}
+
+// joinTeam accepts an invitation and signs the new member in.
+export async function joinTeam(_: FormState, form: FormData): Promise<FormState> {
+  const token = text(form, "token");
+  const res = await api<{ session_token: string }>(`/v1/invitations/accept/${encodeURIComponent(token)}`, {
+    method: "POST",
+    token: null,
+    body: { name: text(form, "name"), password: String(form.get("password") ?? "") },
+  });
+  if (!res.ok) return { error: res.error.message, fields: res.error.details as Record<string, string> | undefined };
+  await setSession(res.data.session_token);
+  redirect("/console");
+}

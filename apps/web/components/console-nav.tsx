@@ -11,6 +11,7 @@ const items = [
   { href: "/console/items", label: "Services and medicines" },
   { href: "/console/claims", label: "Claims" },
   { href: "/console/developers", label: "Developers" },
+  { href: "/console/team", label: "Team" },
   { href: "/console/plan", label: "Plan and usage" },
   { href: "/console/wallet", label: "Wallet" },
 ];

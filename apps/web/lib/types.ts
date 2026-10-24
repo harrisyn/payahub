@@ -20,7 +20,7 @@ export type Organization = {
   plan: "trial" | "flat" | "flat_volume" | "volume" | "enterprise_requested" | "enterprise";
   trial_ends_at: string | null;
   profile: Profile | null;
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string; role: Role; permissions: Perm[] };
   created_at: string;
 };
 
@@ -355,4 +355,28 @@ export type WebhookDelivery = {
   created_at: string;
   delivered_at?: string;
   payload: { id: string; type: string; data?: { claim_id?: string; state?: string } };
+};
+
+export type Role = "owner" | "admin" | "claims" | "finance" | "developer" | "viewer";
+export type Perm = "claims" | "setup" | "billing" | "developers" | "team";
+
+export type Member = { id: string; name: string; email: string; role: Role; created_at: string };
+
+export type Invitation = {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  invited_by: string;
+  created_at: string;
+  expires_at: string;
+};
+
+export type InvitationView = {
+  organization: string;
+  email: string;
+  name: string;
+  role: Role;
+  invited_by: string;
+  expires_at: string;
 };

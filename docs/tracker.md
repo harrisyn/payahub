@@ -97,7 +97,7 @@ each with contract tests against a recorded copy of the platform's API.
   `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
 - [x] Outbound email (SMTP, queued in the same transaction as its cause, retried); operators are emailed every new enquiry once
 - [ ] Set PAYAHUB_SMTP_URL and PAYAHUB_MAIL_FROM in production (needs a mail account, e.g. a transactional provider)
-- [ ] Team members and roles
+- [x] Team members and roles: owner, admin, claims, finance, developer, viewer; email invitations; every console write checked against the role (a new route is closed until given a permission)
 - [x] Real-time answers: create or submit with `Prefer: wait=N` and get the payer's answer in the same response (202 if it takes longer); the async path stays
 - [x] Remove patient identity before every AI call: a provider refuses any text or file the de-identifier did not produce; forms are blacked out on our server (Tesseract) and the model sees only those pages; what was removed is kept on each AI run
 - [ ] Try the redaction on real Ghanaian forms (handwritten, photographed at an angle) and widen the labels it knows
