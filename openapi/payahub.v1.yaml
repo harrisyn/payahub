@@ -164,13 +164,71 @@ paths:
                     type: object
                     required: [local_code, item_id]
                     properties: { local_code: { type: string }, local_name: { type: string }, item_id: { type: string } }
+      description: |
+        Unsent claims with a line carrying one of these codes and no standard item are checked
+        again at once (a claim.rechecked event each): they become ready, wait for a person, or
+        keep what else stops them. `rechecked` counts them.
       responses:
         "200":
-          description: Saved; the full list
+          description: Saved; the full list, and what the recheck did
           content:
             application/json:
-              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/ItemMapping" } } } }
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ItemMapping" } }
+                  rechecked:
+                    type: object
+                    properties:
+                      claims: { type: integer }
+                      ready: { type: integer }
+                      needs_review: { type: integer }
+                      to_fix: { type: integer }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/review-queue:
+    get:
+      summary: What holds unsent claims back and needs a person
+      description: |
+        `codes`: your own codes on unsent claims with no standard item, most claims first, each
+        with word-matched suggestions; map one with PUT /v1/item-mappings and every claim waiting
+        on it is checked again. `claims`: the oldest 25 claims waiting for a person (a model's pick
+        under the threshold, or a possible copy), with what to check; confirm with
+        POST /v1/claims/{id}/review. `counts`: claims waiting for a person and ready to send.
+        An API key sees its own environment.
+      parameters:
+        - { name: environment, in: query, schema: { type: string, enum: [live, sandbox] } }
+      responses:
+        "200":
+          description: The queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  codes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        name: { type: string, description: The newest line's description }
+                        claims: { type: integer }
+                        lines: { type: integer }
+                        amount: { type: integer, description: Minor units }
+                        currency: { type: string }
+                        oldest_claim_at: { type: string, format: date-time }
+                        suggestions: { type: array, items: { type: object } }
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        claim: { $ref: "#/components/schemas/Claim" }
+                        issues: { type: array, items: { type: object } }
+                  counts:
+                    type: object
+                    properties: { needs_review: { type: integer }, ready: { type: integer } }
+        "400": { $ref: "#/components/responses/Error" }
   /v1/item-mappings/{code}:
     delete:
       summary: Remove one mapping
@@ -848,7 +906,7 @@ paths:
         Payahub posts each claim event (claim.created, claim.submission_queued, claim.submission_started,
         claim.attempt_failed, claim.acknowledged, claim.approved, claim.paid, claim.queried,
         claim.rejected, claim.returned_to_ready,
-        claim.validation_failed, claim.reviewed, and ping) to the endpoint as JSON, signed in the
+        claim.validation_failed, claim.reviewed, claim.rechecked, and ping) to the endpoint as JSON, signed in the
         Standard Webhooks format: headers webhook-id, webhook-timestamp and webhook-signature
         (v1, then base64 HMAC-SHA256 of "id.timestamp.body" with the secret's base64 key). Each event is
         written in the same transaction as the change it reports, so none is lost. Delivery is at least

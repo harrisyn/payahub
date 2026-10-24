@@ -84,7 +84,15 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	return st, nil
 }
 
-func (s *Store) Close() { s.Pool.Close() }
+// Close stops the claim listener, if it runs, and closes the pool, which
+// waits for every connection to come back.
+func (s *Store) Close() {
+	s.wait.once.Do(func() {}) // a listener started later would hold the pool open
+	if s.wait.stop != nil {
+		s.wait.stop()
+	}
+	s.Pool.Close()
+}
 
 // Migrate applies our schema (idempotent SQL, in file order) and River's.
 func (s *Store) Migrate(ctx context.Context) error {

@@ -1118,9 +1118,58 @@ export async function confirmIssues(
   });
   if (!res.ok) return { error: res.error.message };
   revalidatePath(`/console/claims/${id}`);
+  revalidatePath("/console/claims/review");
   return {
     ok: confirm.length === 1 ? "Confirmed." : `${confirm.length} confirmed.`,
   };
+}
+
+// mapHeldCode maps one of the clinic's codes from the review queue; the API
+// checks every claim waiting on it again.
+export async function mapHeldCode(
+  _: FormState,
+  form: FormData,
+): Promise<FormState> {
+  const item = text(form, "item");
+  if (!item) return { error: "Choose the standard item." };
+  const res = await api<{
+    rechecked: {
+      claims: number;
+      ready: number;
+      needs_review: number;
+      to_fix: number;
+    };
+  }>("/v1/item-mappings", {
+    method: "PUT",
+    body: {
+      mappings: [
+        {
+          local_code: text(form, "code"),
+          local_name: text(form, "name"),
+          item_id: item,
+        },
+      ],
+    },
+  });
+  if (!res.ok) {
+    const details = res.error.details as Record<string, string> | undefined;
+    return {
+      error: details ? Object.values(details).join(" ") : res.error.message,
+    };
+  }
+  revalidatePath("/console", "layout");
+  // The code leaves the queue, so the page says what happened.
+  const r = res.data.rechecked;
+  const q = new URLSearchParams({
+    mapped: text(form, "name") || text(form, "code"),
+    claims: String(r.claims),
+    ready: String(r.ready),
+    review: String(r.needs_review),
+    fix: String(r.to_fix),
+  });
+  const env = text(form, "env");
+  if (env) q.set("env", env);
+  redirect(`/console/claims/review?${q}`);
 }
 
 export type HookState = FormState & { secret?: string; url?: string };

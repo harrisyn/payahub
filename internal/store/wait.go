@@ -22,6 +22,8 @@ const claimSavedChannel = "claim_saved"
 
 type waiters struct {
 	once sync.Once
+	// stop ends the listener, so Close does not wait on its connection.
+	stop context.CancelFunc
 	mu   sync.Mutex
 	byID map[string]map[chan struct{}]struct{}
 }
@@ -63,29 +65,32 @@ func (w *waiters) wake(id string) {
 	}
 }
 
-func (s *Store) listen() {
-	for {
+func (s *Store) listen(ctx context.Context) {
+	for ctx.Err() == nil {
 		err := func() error {
-			conn, err := s.Pool.Acquire(context.Background())
+			conn, err := s.Pool.Acquire(ctx)
 			if err != nil {
 				return err
 			}
 			defer conn.Release()
-			if _, err := conn.Exec(context.Background(), "LISTEN "+claimSavedChannel); err != nil {
+			if _, err := conn.Exec(ctx, "LISTEN "+claimSavedChannel); err != nil {
 				return err
 			}
 			// Anything saved while we were not listening: look again.
 			s.wait.wake("")
 			for {
-				n, err := conn.Conn().WaitForNotification(context.Background())
+				n, err := conn.Conn().WaitForNotification(ctx)
 				if err != nil {
 					return err
 				}
 				s.wait.wake(n.Payload)
 			}
 		}()
-		if err != nil {
-			time.Sleep(time.Second)
+		if err != nil && ctx.Err() == nil {
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+			}
 		}
 	}
 }
@@ -95,7 +100,9 @@ func (s *Store) listen() {
 func (s *Store) ListenForClaims() {
 	s.wait.once.Do(func() {
 		s.wait.byID = map[string]map[chan struct{}]struct{}{}
-		go s.listen()
+		var ctx context.Context
+		ctx, s.wait.stop = context.WithCancel(context.Background())
+		go s.listen(ctx)
 	})
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/icd10"
+	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 )
 
@@ -222,7 +223,23 @@ func (s *Server) putItemMappings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	s.listItemMappings(w, r)
+	// Claims waiting on these codes are checked again now, so they move on
+	// without anyone opening each one.
+	codes := make([]string, len(ms))
+	for i, m := range ms {
+		codes[i] = m.LocalCode
+	}
+	re, err := queue.RecheckHeld(r.Context(), s.Store, org.ID, s.actor(r.Context(), org), codes)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	saved, err := s.Store.ListItemMappings(r.Context(), org.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": saved, "rechecked": re})
 }
 
 func (s *Server) deleteItemMapping(w http.ResponseWriter, r *http.Request) {

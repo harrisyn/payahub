@@ -585,3 +585,18 @@ label.app-issue input { margin-top: 4px; }
 .app-insurer--query { border-color: #D97706; background: #fffbeb; }
 .app-insurer__question { font-weight: 600; color: #92400e; }
 @media (max-width: 720px) { .app-insurer__ask { justify-items: start; } }
+
+/* Review queue */
+.app-held-list, .app-waiting-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.app-held { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 2fr); gap: 16px; align-items: start; padding: 16px 0; border-top: 1px solid var(--rule); }
+.app-held:first-child { border-top: 0; }
+.app-held__map { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; margin: 0; }
+.app-held__map > .app-button { align-self: end; min-height: 36px; }
+.app-held__map > :not(.app-button):not(.mantine-InputWrapper-root):not(input) { grid-column: 1 / -1; }
+.app-waiting { padding: 16px 0; border-top: 1px solid var(--rule); }
+.app-waiting:first-child { border-top: 0; }
+.app-waiting__head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.app-waiting__foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-top: 4px; }
+@media (max-width: 47.99em) {
+  .app-held { grid-template-columns: 1fr; gap: 8px; }
+}

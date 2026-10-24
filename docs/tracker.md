@@ -63,7 +63,8 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Every model call recorded (task, model, prompt version and hash, input hash, tokens, time, outcome);
       30-day use per task and model on the AI models page
 - [ ] Model-backed standard item → payer code, and diagnosis text → ICD-10 beyond the word search
-- [ ] Review queue in the console for low-confidence lines
+- [x] Review queue (Claims, To review; `GET /v1/review-queue`): own codes holding unsent claims back, mapped once to
+      recheck every claim waiting on them; model picks under the threshold and possible copies, confirmed with a note
 - [ ] Regression checks: a changed input must change the output; known pairs must keep their answer
 - [x] Intake: spreadsheet upload of claims (CSV or Excel, one row per line, checked before saving,
       re-uploads create nothing new, ready claims can be sent straight away; template in the console)

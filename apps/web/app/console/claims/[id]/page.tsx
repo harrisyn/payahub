@@ -55,6 +55,7 @@ const eventText: Record<string, string> = {
   returned_to_ready: "Not sent; back to ready",
   validation_failed: "Stopped before sending: fix needed",
   reviewed: "Checked by a person",
+  rechecked: "Checked again after a code was mapped",
 };
 
 // Events after which a send is under way: the page follows it.

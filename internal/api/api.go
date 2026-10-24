@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	s.webhookRoutes(mux)
 	s.teamRoutes(mux)
 	s.memberCheckRoutes(mux)
+	s.reviewRoutes(mux)
 	return mux
 }
 
@@ -343,13 +344,7 @@ func (s *Server) reviewClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org := orgFrom(r.Context())
-	by := "API key"
-	if org.Session {
-		if email, err := s.Store.UserEmail(r.Context(), org.ID, org.UserID); err == nil && email != "" {
-			by = email
-		}
-	}
-	c, v, err := queue.Review(r.Context(), s.Store, org.ID, r.PathValue("id"), by, in.Note, in.Confirm)
+	c, v, err := queue.Review(r.Context(), s.Store, org.ID, r.PathValue("id"), s.actor(r.Context(), org), in.Note, in.Confirm)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "claim_not_found", "No claim "+r.PathValue("id")+".", nil)
@@ -362,6 +357,17 @@ func (s *Server) reviewClaim(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"claim": c, "validation": v})
 	}
+}
+
+// actor names who made a change, for the claim's trail: the member's email
+// in the console, or the API key.
+func (s *Server) actor(ctx context.Context, org store.Org) string {
+	if org.Session {
+		if email, err := s.Store.UserEmail(ctx, org.ID, org.UserID); err == nil && email != "" {
+			return email
+		}
+	}
+	return "API key"
 }
 
 // pricesGiven reports, for each line of a raw claim request, whether it
