@@ -36,13 +36,15 @@ var Thresholds = map[claim.FieldOrigin]float64{
 type Facts struct {
 	Today      time.Time
 	Duplicates []claim.Duplicate
+	// Tariff is the payer's own list and rules; zero checks nothing.
+	Tariff Tariff
 }
 
 // DefaultFilingDays is the NHIS limit for submitting a claim (LI 1809).
 const DefaultFilingDays = 60
 
-// Check runs the payer-neutral edit rules. Payer-specific rules arrive later
-// as data per connector, not as branches here.
+// Check runs the edit rules: the payer-neutral ones, then the payer's own
+// list and rules, which arrive as data (Facts.Tariff), never as branches here.
 func Check(c *claim.Claim, cfg connector.SubmissionConfig, f Facts) []Issue {
 	var issues []Issue
 	add := func(code string, sev Severity, field, msg string) {
@@ -64,6 +66,7 @@ func Check(c *claim.Claim, cfg connector.SubmissionConfig, f Facts) []Issue {
 	}
 	issues = append(issues, filing(c, cfg, f.Today)...)
 	issues = append(issues, duplicates(c, f.Duplicates)...)
+	issues = append(issues, tariff(c, f.Tariff)...)
 
 	for i, l := range c.Lines {
 		field := fmt.Sprintf("lines[%d].mapping", i)

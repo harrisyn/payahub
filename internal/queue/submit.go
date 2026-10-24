@@ -174,7 +174,7 @@ func validate(ctx context.Context, q store.Querier, c *claim.Claim, m connector.
 	if err != nil {
 		return engine.Validation{}, err
 	}
-	return engine.Validate(c, m, overrides, engine.Facts{Today: time.Now(), Duplicates: dups}), nil
+	return engine.Validate(c, m, overrides, engine.Facts{Today: time.Now(), Duplicates: dups, Tariff: engine.TariffFor(c.PayerID)}), nil
 }
 
 func Prepare(ctx context.Context, q store.Querier, c *claim.Claim) (connector.Manifest, error) {

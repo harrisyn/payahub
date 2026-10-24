@@ -487,6 +487,27 @@ export type ListState = FormState & {
   skipped?: { line: number; reason: string }[];
 };
 
+// savePayerRules sets how strictly a payer's list applies to claims.
+export async function savePayerRules(
+  _: FormState,
+  form: FormData,
+): Promise<FormState> {
+  const payer = text(form, "payer");
+  const res = await api(
+    `/v1/operator/payers/${encodeURIComponent(payer)}/rules`,
+    {
+      method: "PUT",
+      body: {
+        price_policy: text(form, "price_policy"),
+        unlisted_policy: text(form, "unlisted_policy"),
+      },
+    },
+  );
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath(`/console/operator/${payer}`);
+  return { ok: "Saved. Claims are checked with these rules from now on." };
+}
+
 export async function loadPayerList(
   _: ListState,
   form: FormData,

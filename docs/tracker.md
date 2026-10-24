@@ -76,7 +76,8 @@ each with contract tests against a recorded copy of the platform's API.
 ## 5. Checks before sending
 
 - [x] Required fields, unmapped lines, totals
-- [ ] Payer rules as data (allowed items per payer, quantity limits, prices)
+- [x] Payer rules as data: each code in an insurer's list can carry most per claim, one sex, an age range and
+      authorisation (columns in the list CSV); a price above the tariff or a code outside the list warns or stops, per insurer
 - [x] Duplicate claim detection: the same patient, payer and visit date; an exact copy waits for a person to confirm
 - [x] Filing deadline (60 days, LI 1809, per payer), warning in the last week; a payer can be set to block late claims
 - [x] Confirming issues that await review, recorded with who and why (`POST /v1/claims/{id}/review`)

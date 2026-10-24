@@ -47,6 +47,22 @@ type payerView struct {
 	Capabilities      []connector.Verb `json:"capabilities"`
 	CodedItems        int              `json:"coded_items"`
 	Notes             string           `json:"notes,omitempty"`
+	Rules             payerRulesView   `json:"rules"`
+}
+
+// payerRulesView is how strictly the payer's own list applies, with the
+// defaults spelled out.
+type payerRulesView struct {
+	PricePolicy    string `json:"price_policy"`
+	UnlistedPolicy string `json:"unlisted_policy"`
+	HasList        bool   `json:"has_list"`
+}
+
+func policy(p string) string {
+	if p == "" {
+		return "warn"
+	}
+	return p
 }
 
 func viewPayer(p catalog.Payer) payerView {
@@ -60,6 +76,8 @@ func viewPayer(p catalog.Payer) payerView {
 		Connector: connectorRef{ID: m.Key, Name: m.Name, Kind: m.Kind, Status: m.Status},
 		Status:    status, MemberOTPRequired: m.MemberOTPRequired, Capabilities: m.Verbs,
 		CodedItems: catalog.CodedItems(p.ID), Notes: p.Notes,
+		Rules: payerRulesView{PricePolicy: policy(p.Rules.PricePolicy), UnlistedPolicy: policy(p.Rules.UnlistedPolicy),
+			HasList: catalog.HasList(p.ID)},
 	}
 }
 

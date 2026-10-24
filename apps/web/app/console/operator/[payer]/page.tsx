@@ -6,15 +6,17 @@ import {
   CodesTable,
   ListForm,
   PayerForm,
+  RulesForm,
 } from "@/components/operator-forms";
 import { api } from "@/lib/api";
-import { dateTime, fieldLabels, kindName } from "@/lib/format";
+import { dateTime, fieldLabels, kindName, money } from "@/lib/format";
 import { requireOperator } from "@/lib/session";
 import type {
   CatalogChange,
   Connector,
   ItemCode,
   ItemKind,
+  ListEntry,
   OpPayer,
   PayerCodes,
 } from "@/lib/types";
@@ -60,8 +62,12 @@ function describe(c: CatalogChange): string {
         .filter(Boolean)
         .join(", ");
     }
-    case "list_loaded":
-      return `Code list loaded: ${Number(d.entries ?? 0).toLocaleString("en-GB")} codes`;
+    case "list_loaded": {
+      const n = Number(d.with_rules ?? 0);
+      return `Code list loaded: ${Number(d.entries ?? 0).toLocaleString("en-GB")} codes${n ? `, ${n} with rules` : ""}`;
+    }
+    case "rules_changed":
+      return `Rules: prices above the tariff ${d.price_policy === "block" ? "stop a claim" : "warn"}; codes outside the list ${d.unlisted_policy === "block" ? "stop a claim" : "warn"}`;
     default:
       return "Seeded from the shipped catalogue";
   }
@@ -78,12 +84,16 @@ export default async function OperatorPayer({
   const { payer: id } = await params;
   const { kind = "", show = "" } = await searchParams;
   const enc = encodeURIComponent(id);
-  const [payers, connectors, codes, changes] = await Promise.all([
+  const [payers, connectors, codes, changes, limited] = await Promise.all([
     api<{ data: OpPayer[] }>("/v1/operator/payers"),
     api<{ data: Connector[] }>("/v1/connectors"),
     api<PayerCodes>(`/v1/operator/payers/${enc}/codes`),
     api<{ data: CatalogChange[] }>(`/v1/operator/payers/${enc}/changes`),
+    api<{ data: ListEntry[]; total: number }>(
+      `/v1/operator/payers/${enc}/list?limited=true`,
+    ),
   ]);
+  const ruled = limited.ok ? limited.data : { data: [], total: 0 };
   const p = payers.ok ? payers.data.data.find((x) => x.id === id) : undefined;
   if (!p || !codes.ok) notFound();
   const label = fieldLabels(connectors.ok ? connectors.data.data : []);
@@ -242,6 +252,17 @@ export default async function OperatorPayer({
             </p>
             <ListForm payer={p.id} size={codes.data.list_size} />
           </section>
+          <section className="app-card" aria-labelledby="rules-h">
+            <h2 id="rules-h" className="app-card__title">
+              Rules
+            </h2>
+            <p className="app-muted">
+              {hasList
+                ? "Claims to this payer are checked against its list before they go. What the list says about a code (most per claim, one sex, an age range, authorisation) always stops a claim that breaks it."
+                : "Load the payer's list first: the rules apply to the codes in it."}
+            </p>
+            <RulesForm payer={p.id} rules={p.rules} />
+          </section>
           <section className="app-card" aria-labelledby="hist-h">
             <h2 id="hist-h" className="app-card__title">
               Changes
@@ -268,6 +289,67 @@ export default async function OperatorPayer({
           </section>
         </div>
       </div>
+
+      {ruled.total > 0 && (
+        <section className="app-card app-card--flush" aria-labelledby="ruled-h">
+          <div className="app-card__head app-card__head--pad">
+            <h2 id="ruled-h" className="app-card__title">
+              Codes with rules
+            </h2>
+            <p className="app-muted">
+              {ruled.total.toLocaleString("en-GB")} of the payer&apos;s codes
+              carry a limit beyond their price.
+            </p>
+          </div>
+          <table className="app-table app-table--stack">
+            <thead>
+              <tr>
+                <th scope="col">Code</th>
+                <th scope="col">Name</th>
+                <th scope="col" className="app-right">
+                  Tariff
+                </th>
+                <th scope="col">Rules</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ruled.data.slice(0, 100).map((e) => (
+                <tr key={e.code}>
+                  <td className="app-id">{e.code}</td>
+                  <td>{e.name}</td>
+                  <td className="app-right app-id">
+                    {e.price != null ? (
+                      money(e.price)
+                    ) : (
+                      <span className="app-dash">–</span>
+                    )}
+                  </td>
+                  <td>{rulesText(e)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
     </div>
   );
+}
+
+function rulesText(e: ListEntry) {
+  const age =
+    e.min_age != null && e.max_age != null
+      ? `aged ${e.min_age} to ${e.max_age}`
+      : e.min_age != null
+        ? `aged ${e.min_age} and over`
+        : e.max_age != null
+          ? `aged up to ${e.max_age}`
+          : null;
+  return [
+    e.max_quantity != null && `at most ${e.max_quantity} per claim`,
+    e.sex && (e.sex === "female" ? "women only" : "men only"),
+    age,
+    e.needs_authorization && "needs authorisation",
+  ]
+    .filter(Boolean)
+    .join(", ");
 }

@@ -1513,7 +1513,13 @@ paths:
   /v1/operator/payers/{id}/list:
     put:
       security: [{ session: [] }]
-      summary: Replace the payer's own code list from CSV (header row with code and name; group and price optional)
+      summary: Replace the payer's own code list from CSV
+      description: |
+        A header row names the columns: code and name are required; group, price (major units) and
+        the payer's rules for each code are optional: max quantity (per claim), sex (F or M), min age
+        and max age (whole years at the visit) and authorization (yes when the payer needs prior
+        authorisation). Claims to the payer are checked against these rules; breaking one stops the
+        claim (quantity_over_limit, line_not_for_sex, line_not_for_age, authorization_required).
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
         required: true
@@ -1530,6 +1536,53 @@ paths:
                 properties:
                   entries: { type: integer }
                   skipped: { type: array, items: { type: object, properties: { line: { type: integer }, reason: { type: string } } } }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      security: [{ session: [] }]
+      summary: The payer's own list, at most 500 codes; limited=true keeps the codes with rules
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limited, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        name: { type: string }
+                        group: { type: string }
+                        price: { type: integer, description: Minor units }
+                        max_quantity: { type: integer }
+                        sex: { enum: [female, male] }
+                        min_age: { type: integer }
+                        max_age: { type: integer }
+                        needs_authorization: { type: boolean }
+  /v1/operator/payers/{id}/rules:
+    put:
+      security: [{ session: [] }]
+      summary: Set whether a price above the tariff, or a code outside the payer's list, stops a claim (block) or warns
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [price_policy, unlisted_policy]
+              properties:
+                price_policy: { enum: [warn, block], description: price_above_tariff }
+                unlisted_policy: { enum: [warn, block], description: not_in_payer_list }
+      responses:
+        "200": { description: The payer, with its rules }
         "422": { $ref: "#/components/responses/Error" }
   /v1/operator/payers/{id}/changes:
     get:
@@ -1999,6 +2052,13 @@ components:
         capabilities: { type: array, items: { type: string } }
         coded_items: { type: integer, description: Standard items this payer has a code for }
         notes: { type: string }
+        rules:
+          type: object
+          description: How strictly the payer's own list applies to claims (when has_list)
+          properties:
+            price_policy: { enum: [warn, block] }
+            unlisted_policy: { enum: [warn, block] }
+            has_list: { type: boolean }
     CredentialField:
       type: object
       properties: { name: { type: string }, label: { type: string }, secret: { type: boolean }, required: { type: boolean } }

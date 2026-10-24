@@ -56,6 +56,17 @@ type Payer struct {
 	// Inactive payers are kept for the claims already sent to them but
 	// offered to no one.
 	Inactive bool `json:"inactive,omitempty"`
+	// Rules say how strictly the payer's own list is applied to claims.
+	Rules PayerRules `json:"rules"`
+}
+
+// PayerRules is how a payer treats what its list does not allow. Each is
+// "warn" (the claim goes, flagged; the default) or "block".
+type PayerRules struct {
+	// PricePolicy: a line priced above the payer's tariff.
+	PricePolicy string `json:"price_policy,omitempty"`
+	// UnlistedPolicy: a payer code that is not in the payer's own list.
+	UnlistedPolicy string `json:"unlisted_policy,omitempty"`
 }
 
 // Kind is standalone or integrated, from the connector's kind.
@@ -114,6 +125,19 @@ type ListEntry struct {
 	Name  string `json:"name"`
 	Group string `json:"group,omitempty"`
 	Price *int64 `json:"price,omitempty"` // minor units
+	// What the payer allows for the code, when it says: the most on one
+	// claim, one sex only ("female" or "male"), an age range in whole years
+	// at the visit, and prior authorisation.
+	MaxQuantity        *int64 `json:"max_quantity,omitempty"`
+	Sex                string `json:"sex,omitempty"`
+	MinAge             *int   `json:"min_age,omitempty"`
+	MaxAge             *int   `json:"max_age,omitempty"`
+	NeedsAuthorization bool   `json:"needs_authorization,omitempty"`
+}
+
+// Limited reports whether the entry carries any rule beyond its price.
+func (e ListEntry) Limited() bool {
+	return e.MaxQuantity != nil || e.Sex != "" || e.MinAge != nil || e.MaxAge != nil || e.NeedsAuthorization
 }
 
 // Data is the catalogue as stored: what Build checks and indexes.
@@ -131,6 +155,7 @@ type Catalog struct {
 	byItem  map[string]Item
 	codes   map[string]map[string]PayerCode // payer -> item -> code, generated codes included
 	lists   map[string][]listed
+	listed  map[string]map[string]int // payer -> code -> position in lists
 	index   []indexed
 }
 
@@ -194,7 +219,7 @@ func readSeed(fsys fs.FS) (Data, error) {
 // Build checks d and indexes it for lookups.
 func Build(d Data) (*Catalog, error) {
 	c := &Catalog{byPayer: map[string]Payer{}, byItem: map[string]Item{}, codes: map[string]map[string]PayerCode{},
-		lists: map[string][]listed{}, payers: d.Payers, items: d.Items}
+		lists: map[string][]listed{}, listed: map[string]map[string]int{}, payers: d.Payers, items: d.Items}
 	for _, it := range c.items {
 		if _, dup := c.byItem[it.ID]; dup || it.ID == "" || !slices.Contains(ItemKinds, it.Kind) {
 			return nil, fmt.Errorf("item %q is duplicated or has no valid kind", it.ID)
@@ -220,10 +245,13 @@ func Build(d Data) (*Catalog, error) {
 			codes[id] = pc
 		}
 		c.codes[p.ID] = codes
+		at := map[string]int{}
 		for _, e := range d.Lists[p.ID] {
 			w := tokens(e.Name)
+			at[e.Code] = len(c.lists[p.ID])
 			c.lists[p.ID] = append(c.lists[p.ID], listed{entry: e, words: w, numbers: numbers(w)})
 		}
+		c.listed[p.ID] = at
 	}
 	return c, nil
 }
@@ -308,10 +336,13 @@ func PayerList(payerID string) []ListEntry {
 
 // ListEntryFor finds a code in the payer's own list.
 func ListEntryFor(payerID, code string) (ListEntry, bool) {
-	for _, e := range get().lists[payerID] {
-		if e.entry.Code == code {
-			return e.entry, true
-		}
+	c := get()
+	i, ok := c.listed[payerID][code]
+	if !ok {
+		return ListEntry{}, false
 	}
-	return ListEntry{}, false
+	return c.lists[payerID][i].entry, true
 }
+
+// HasList reports whether the payer's own list is loaded.
+func HasList(payerID string) bool { return len(get().lists[payerID]) > 0 }

@@ -8,6 +8,7 @@ import {
   loadPayerList,
   saveCodes,
   savePayer,
+  savePayerRules,
   type CodesState,
   type FormState,
   type ListState,
@@ -17,7 +18,7 @@ import {
 import { Field, Messages, Submit } from "@/components/forms";
 import { Select, Textarea, TextInput } from "@/components/ui";
 import { kindName } from "@/lib/format";
-import type { Connector, ItemCode, OpPayer } from "@/lib/types";
+import type { Connector, ItemCode, OpPayer, Policy } from "@/lib/types";
 
 // PayerForm adds a payer to the shared catalogue or edits one. The settings
 // it asks for are the chosen connector's payer fields, so they change with it.
@@ -153,7 +154,9 @@ export function ListForm({ payer, size }: { payer: string; size: number }) {
         />
         <p className="field__hint" id="f-file-h">
           CSV with a header row: code and name, then group and price if the
-          payer gives them.
+          payer gives them. The payer&rsquo;s rules for a code go in max
+          quantity, sex (F or M), min age, max age and authorization (yes)
+          columns; blank means no limit.
         </p>
       </div>
       <details className="app-details">
@@ -163,7 +166,7 @@ export function ListForm({ payer, size }: { payer: string; size: number }) {
           aria-label="The list as CSV"
           minRows={6}
           placeholder={
-            "code,name,group,price\nCON-001,General consultation,Consultation,120.00"
+            "code,name,group,price,max quantity,sex,min age,max age,authorization\nCON-001,General consultation,Consultation,120.00,,,,,\nANC-01,Antenatal visit,Consultation,60.00,,F,12,55,"
           }
         />
       </details>
@@ -185,6 +188,45 @@ export function ListForm({ payer, size }: { payer: string; size: number }) {
           </ul>
         </details>
       )}
+    </form>
+  );
+}
+
+// RulesForm sets how strictly the payer's list applies: whether a price above
+// its tariff, or a code outside its list, stops a claim or only warns.
+export function RulesForm({
+  payer,
+  rules,
+}: {
+  payer: string;
+  rules: { price_policy: Policy; unlisted_policy: Policy };
+}) {
+  const [s, action] = useActionState(savePayerRules, {} as FormState);
+  const options = [
+    { value: "warn", label: "Send it, with a warning" },
+    { value: "block", label: "Stop the claim" },
+  ];
+  return (
+    <form action={action} className="app-form">
+      <input type="hidden" name="payer" value={payer} />
+      <Select
+        id="f-price-policy"
+        name="price_policy"
+        label="A line priced above the payer's tariff"
+        defaultValue={rules.price_policy}
+        data={options}
+      />
+      <Select
+        id="f-unlisted-policy"
+        name="unlisted_policy"
+        label="A code that is not in the payer's list"
+        defaultValue={rules.unlisted_policy}
+        data={options}
+      />
+      <div className="app-form__foot">
+        <Submit className="app-button">Save rules</Submit>
+        <Messages state={s} />
+      </div>
     </form>
   );
 }

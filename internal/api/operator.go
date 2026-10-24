@@ -28,6 +28,8 @@ func (s *Server) operatorRoutes(mux *http.ServeMux) {
 	mux.Handle("PUT /v1/operator/payers/{id}/codes", s.operator(s.opPutCodes))
 	mux.Handle("POST /v1/operator/payers/{id}/codes/accept", s.operator(s.opAcceptSuggestions))
 	mux.Handle("PUT /v1/operator/payers/{id}/list", s.operator(s.opPutList))
+	mux.Handle("PUT /v1/operator/payers/{id}/rules", s.operator(s.opPutRules))
+	mux.Handle("GET /v1/operator/payers/{id}/list", s.operator(s.opGetList))
 	mux.Handle("GET /v1/operator/payers/{id}/changes", s.operator(s.opChanges))
 }
 
@@ -47,6 +49,7 @@ type opPayerView struct {
 	Inactive      bool              `json:"inactive"`
 	MissingFields []string          `json:"missing_fields"`
 	ListSize      int               `json:"list_size"`
+	ListRules     int               `json:"list_rules"` // codes in the list with a rule beyond price
 	TotalItems    int               `json:"total_items"`
 }
 
@@ -55,6 +58,11 @@ func viewOpPayer(p catalog.Payer) opPayerView {
 		ListSize: len(catalog.PayerList(p.ID)), TotalItems: len(catalog.Items(""))}
 	if v.Fields == nil {
 		v.Fields = map[string]string{}
+	}
+	for _, e := range catalog.PayerList(p.ID) {
+		if e.Limited() {
+			v.ListRules++
+		}
 	}
 	if m, _, ok := connector.Lookup(p.Connector); ok {
 		for _, f := range m.PayerFields {
@@ -287,7 +295,9 @@ func (s *Server) opAcceptSuggestions(w http.ResponseWriter, r *http.Request) {
 }
 
 // opPutList loads the payer's own code list from CSV with a header row:
-// code and name are required; group and price (in major units) optional.
+// code and name are required; group, price (in major units) and the payer's
+// rules for each code (max quantity, sex, min age, max age, authorisation)
+// optional.
 func (s *Server) opPutList(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.opPayer(w, r)
 	if !ok {
@@ -312,6 +322,100 @@ func (s *Server) opPutList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": len(entries), "skipped": skipped})
+}
+
+// opGetList returns the payer's own list, at most 500 codes; ?limited=true
+// keeps the codes that carry a rule beyond their price.
+func (s *Server) opGetList(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.opPayer(w, r)
+	if !ok {
+		return
+	}
+	limited := r.URL.Query().Get("limited") == "true"
+	all := catalog.PayerList(p.ID)
+	out := []catalog.ListEntry{}
+	n := 0
+	for _, e := range all {
+		if limited && !e.Limited() {
+			continue
+		}
+		n++
+		if len(out) < 500 {
+			out = append(out, e)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "total": n})
+}
+
+// opPutRules sets whether a price above the payer's tariff, or a code outside
+// its list, stops a claim (block) or only warns (warn).
+func (s *Server) opPutRules(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.opPayer(w, r)
+	if !ok {
+		return
+	}
+	var in catalog.PayerRules
+	if !decode(w, r, &in) {
+		return
+	}
+	for _, v := range []string{in.PricePolicy, in.UnlistedPolicy} {
+		if v != "warn" && v != "block" {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_rules", "price_policy and unlisted_policy are warn or block.", nil)
+			return
+		}
+	}
+	if err := s.Store.SavePayerRules(r.Context(), p.ID, in, orgFrom(r.Context()).UserID); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	np, _ := catalog.LookupPayer(p.ID)
+	writeJSON(w, http.StatusOK, viewOpPayer(np))
+}
+
+// listRules reads a list row's rules into e, or says why the row cannot be
+// used. Blank cells set nothing.
+func listRules(e *catalog.ListEntry, qty, sex, minAge, maxAge, auth string) string {
+	if qty != "" {
+		n, err := strconv.ParseInt(qty, 10, 64)
+		if err != nil || n < 1 {
+			return "max quantity " + qty + " is not a whole number of 1 or more"
+		}
+		e.MaxQuantity = &n
+	}
+	switch strings.ToLower(sex) {
+	case "", "any", "all", "both":
+	case "f", "female", "women", "woman":
+		e.Sex = "female"
+	case "m", "male", "men", "man":
+		e.Sex = "male"
+	default:
+		return "sex " + sex + " is not female, male or blank"
+	}
+	for _, a := range []struct {
+		raw string
+		to  **int
+		at  string
+	}{{minAge, &e.MinAge, "min age"}, {maxAge, &e.MaxAge, "max age"}} {
+		if a.raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(a.raw)
+		if err != nil || n < 0 || n > 150 {
+			return a.at + " " + a.raw + " is not an age in years"
+		}
+		*a.to = &n
+	}
+	if e.MinAge != nil && e.MaxAge != nil && *e.MinAge > *e.MaxAge {
+		return "min age is above max age"
+	}
+	switch strings.ToLower(auth) {
+	case "", "no", "n", "false", "0":
+	case "yes", "y", "true", "1", "required":
+		e.NeedsAuthorization = true
+	default:
+		return "authorisation " + auth + " is not yes or no"
+	}
+	return ""
 }
 
 type skippedRow struct {
@@ -344,6 +448,11 @@ func parseList(text string) ([]catalog.ListEntry, []skippedRow, error) {
 	}
 	ci, ni := pick("code", "item code", "product id", "tariff code"), pick("name", "description", "item", "product name")
 	gi, pi := pick("group", "category", "type"), pick("price", "tariff", "unit price", "amount")
+	qi := pick("max quantity", "max_quantity", "max qty", "quantity limit", "limit")
+	si := pick("sex", "gender")
+	loi, hii := pick("min age", "min_age", "minimum age"), pick("max age", "max_age", "maximum age")
+	ai := pick("needs authorization", "needs_authorization", "needs authorisation", "authorization", "authorisation",
+		"prior authorization", "prior authorisation")
 	if ci < 0 || ni < 0 {
 		return nil, nil, errors.New("the first row must name the columns, with at least code and name")
 	}
@@ -386,6 +495,10 @@ func parseList(text string) ([]catalog.ListEntry, []skippedRow, error) {
 			}
 			minor := int64(f*100 + 0.5)
 			e.Price = &minor
+		}
+		if why := listRules(&e, get(qi), get(si), get(loi), get(hii), get(ai)); why != "" {
+			skipped = append(skipped, skippedRow{line, why})
+			continue
 		}
 		seen[e.Code] = true
 		entries = append(entries, e)
