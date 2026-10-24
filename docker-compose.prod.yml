@@ -1,0 +1,120 @@
+# Production on Dokploy (Docker Compose app; compose path: ./docker-compose.prod.yml).
+# Set the variables in .env.example under the app's Environment tab, then add
+# two domains under Domains: WEB_DOMAIN -> service "web" port 3000, and
+# API_DOMAIN -> service "api" port 8080, both HTTPS with Let's Encrypt.
+# Dokploy adds the Traefik labels and its network to those two services.
+#
+# Services find each other by the aliases payahub-postgres and payahub-api, not
+# by service name: without Isolated Deployments, api and web also join the
+# shared dokploy-network, where another app's "api" or "postgres" would answer.
+# Step by step: docs/deploy.md.
+#
+# Every deploy: migrate runs to completion first (migrations are idempotent),
+# then the API and workers start on the new schema. A worker that is stopped
+# finishes its in-flight submissions within 30s; anything unfinished is picked
+# up by the next worker after a reconciliation with the payer.
+
+x-backend: &backend
+  build: .
+  image: payahub-backend:${PAYAHUB_RELEASE:-latest}
+  restart: unless-stopped
+  networks: [internal]
+  environment: &backend-env
+    DATABASE_URL: ${DATABASE_URL:-postgres://payahub:${POSTGRES_PASSWORD}@payahub-postgres:5432/payahub?sslmode=disable}
+    PAYAHUB_VAULT_KEY: ${PAYAHUB_VAULT_KEY:?set PAYAHUB_VAULT_KEY (openssl rand -base64 32) and keep a copy}
+    PAYAHUB_CONSOLE_URL: https://${WEB_DOMAIN:?set WEB_DOMAIN}
+    PAYAHUB_SMTP_URL: ${PAYAHUB_SMTP_URL:-}
+    PAYAHUB_MAIL_FROM: ${PAYAHUB_MAIL_FROM:-no-reply@payahub.com}
+    PAYAHUB_PAYSTACK_SECRET_KEY: ${PAYAHUB_PAYSTACK_SECRET_KEY:-}
+    PAYAHUB_PAYMENTS_SANDBOX: ${PAYAHUB_PAYMENTS_SANDBOX:-}
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    networks:
+      internal: { aliases: [payahub-postgres] }
+    environment:
+      POSTGRES_USER: payahub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 24)}
+      POSTGRES_DB: payahub
+    # Each Payahub process keeps a pool of up to 8 connections per CPU.
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-300}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
+    shm_size: 256mb
+    # A named volume, so Dokploy's volume backups can take it.
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "payahub", "-d", "payahub"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *backend
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    command: ["api"]
+    networks:
+      internal: { aliases: [payahub-api] }
+    expose: ["8080"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "/payahub", "healthcheck"]
+      interval: 10s
+      timeout: 4s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 40s
+
+  worker:
+    <<: *backend
+    command: ["worker"]
+    environment:
+      <<: *backend-env
+      PAYAHUB_WORKERS: ${PAYAHUB_WORKERS:-100}
+    deploy:
+      replicas: ${PAYAHUB_WORKER_REPLICAS:-1}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    stop_grace_period: 45s
+
+  web:
+    build:
+      context: apps/web
+      args:
+        NEXT_PUBLIC_SITE_URL: https://${WEB_DOMAIN}
+        NEXT_PUBLIC_API_URL: https://${API_DOMAIN:?set API_DOMAIN}
+        NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL:-hello@payahub.com}
+        NEXT_PUBLIC_SITE_INDEXABLE: ${NEXT_PUBLIC_SITE_INDEXABLE:-}
+    image: payahub-web:${PAYAHUB_RELEASE:-latest}
+    restart: unless-stopped
+    networks: [internal]
+    expose: ["3000"]
+    environment:
+      # The web server reaches the API on the private network, never through Traefik.
+      PAYAHUB_API_URL: http://payahub-api:8080
+    depends_on:
+      api: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+networks:
+  internal:
+
+volumes:
+  pgdata:

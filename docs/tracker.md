@@ -103,6 +103,11 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Lead capture on the landing page (contact me, platform not listed, do you have this payer, interface specs):
   `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
 - [x] Outbound email (SMTP, queued in the same transaction as its cause, retried); operators are emailed every new enquiry once
+- [x] Docker: `docker-compose.yml` runs the whole product locally (web, API and worker, Postgres, Mailpit for email);
+      `docker-compose.prod.yml` deploys to Dokploy (migrate before every release, API with healthcheck, scalable
+      workers with graceful stop, web on the private network, Postgres on a named volume for backups);
+      steps in `docs/deploy.md`; CI builds both images
+- [ ] First production deploy on Dokploy: DNS for the web and API hostnames, secrets set, vault key stored apart, volume backups on
 - [ ] Set PAYAHUB_SMTP_URL and PAYAHUB_MAIL_FROM in production (needs a mail account, e.g. a transactional provider)
 - [x] Team members and roles: owner, admin, claims, finance, developer, viewer; email invitations; every console write checked against the role (a new route is closed until given a permission)
 - [x] Real-time answers: create or submit with `Prefer: wait=N` and get the payer's answer in the same response (202 if it takes longer); the async path stays
@@ -129,3 +134,4 @@ each with contract tests against a recorded copy of the platform's API.
 - Test accounts on XCeli, Medserve, SmartClaims, RX Insurance and ClaimIQ
 - An AI provider key (entered in the console under AI models), and agreement on which provider sees claim data
 - Final name, prices and contact email
+- The Dokploy server and the production hostnames (web and API)

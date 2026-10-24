@@ -5,6 +5,7 @@
 //	payahub worker    work submission jobs
 //	payahub dev       migrate, seed the sandbox key, then api + worker in one process
 //	payahub operator EMAIL [off]  let a console user edit the shared catalogue (or stop them)
+//	payahub healthcheck  exit 0 if this container's API answers /v1/health (for Docker)
 //
 // Configuration is by environment: DATABASE_URL, PAYAHUB_ADDR (default :8080),
 // PAYAHUB_WORKERS (concurrent submissions per worker process, default 100),
@@ -20,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -42,8 +44,15 @@ const sandboxKey = "sk_sandbox_dev"
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: payahub migrate|api|worker|dev|operator")
+		fmt.Fprintln(os.Stderr, "usage: payahub migrate|api|worker|dev|operator|healthcheck")
 		os.Exit(2)
+	}
+	if os.Args[1] == "healthcheck" {
+		if err := healthcheck(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -51,6 +60,25 @@ func main() {
 		logger.Error("exit", "err", err)
 		os.Exit(1)
 	}
+}
+
+// healthcheck asks the API in this container whether it and its database are
+// up. The image has no curl, so Docker's HEALTHCHECK runs the binary itself.
+func healthcheck() error {
+	_, port, err := net.SplitHostPort(env("PAYAHUB_ADDR", ":8080"))
+	if err != nil {
+		return fmt.Errorf("PAYAHUB_ADDR: %w", err)
+	}
+	c := http.Client{Timeout: 3 * time.Second}
+	res, err := c.Get("http://127.0.0.1:" + port + "/v1/health")
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("health: %s", res.Status)
+	}
+	return nil
 }
 
 func env(key, def string) string {
