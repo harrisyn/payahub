@@ -24,7 +24,7 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 
 - [x] Standard item list (services, labs, imaging, procedures, medicines with ATC, consumables)
 - [x] A clinic maps its own codes to standard items once; suggestions to confirm
-- [~] Line resolution: clinic code → standard item → payer code, at create and at send
+- [x] Line resolution: clinic code → standard item → payer code, at create, at send and again when a code is mapped
 - [x] Clinic price list: add, remove, import CSV or Excel (merge or replace, dry run, skipped rows listed);
       a claim line with the clinic's code needs no price or name; each code gets a suggested standard item to confirm
 - [x] A larger standard list for Ghana: 262 items (consultations and ward days, 43 labs, 24 imaging,
