@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/openapi"
 )
@@ -86,7 +87,7 @@ func (s *Server) createLead(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_lead", "Some details need fixing.", problems)
 		return
 	}
-	lead, replayed, err := s.Store.CreateLead(r.Context(), in, r.Header.Get("Idempotency-Key"))
+	lead, replayed, err := queue.CreateLead(r.Context(), s.Store, s.Queue, in, r.Header.Get("Idempotency-Key"), s.ConsoleURL)
 	if err != nil {
 		s.internal(w, r, err)
 		return

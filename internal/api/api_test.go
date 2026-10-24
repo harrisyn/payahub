@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/harrisyn/payahub/internal/claim"
 	_ "github.com/harrisyn/payahub/internal/connector/all"
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/payment"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
@@ -64,7 +66,7 @@ func setup(t testing.TB) env {
 		if setupErr = err; err != nil {
 			return
 		}
-		rc, err := queue.NewClient(st, v, 200, logger)
+		rc, err := queue.NewClient(st, v, 200, logger, testMail)
 		if setupErr = err; err != nil {
 			return
 		}
@@ -325,4 +327,35 @@ func TestThroughput(t *testing.T) {
 	done := time.Since(start)
 	t.Logf("%d claims: accepted (create+submit) in %v = %.0f/s; all acknowledged in %v = %.0f/s",
 		n, accepted.Round(time.Millisecond), float64(n)/accepted.Seconds(), done.Round(time.Millisecond), float64(n)/done.Seconds())
+}
+
+// testMail keeps every email the workers send.
+var testMail = &mailbox{}
+
+type mailbox struct {
+	mu   sync.Mutex
+	sent []mail.Message
+}
+
+func (m *mailbox) Send(_ context.Context, msg mail.Message) error {
+	if err := mail.Check(msg); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+// to returns the messages sent to addr so far.
+func (m *mailbox) to(addr string) []mail.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []mail.Message
+	for _, msg := range m.sent {
+		if slices.Contains(msg.To, addr) {
+			out = append(out, msg)
+		}
+	}
+	return out
 }

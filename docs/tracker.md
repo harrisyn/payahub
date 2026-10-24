@@ -95,7 +95,8 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Landing page taste pass, problem story, platform layer and integration-guide sections, SEO structured data
 - [x] Lead capture on the landing page (contact me, platform not listed, do you have this payer, interface specs):
   `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
-- [ ] Notify operators of a new enquiry by email once outbound email is set up
+- [x] Outbound email (SMTP, queued in the same transaction as its cause, retried); operators are emailed every new enquiry once
+- [ ] Set PAYAHUB_SMTP_URL and PAYAHUB_MAIL_FROM in production (needs a mail account, e.g. a transactional provider)
 - [ ] Team members and roles
 - [x] Real-time answers: create or submit with `Prefer: wait=N` and get the payer's answer in the same response (202 if it takes longer); the async path stays
 - [x] Remove patient identity before every AI call: a provider refuses any text or file the de-identifier did not produce; forms are blacked out on our server (Tesseract) and the model sees only those pages; what was removed is kept on each AI run

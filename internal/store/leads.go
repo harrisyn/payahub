@@ -33,19 +33,25 @@ func scanLead(r pgx.Row) (Lead, error) {
 
 // CreateLead saves an enquiry. A repeated idempotency key returns the lead
 // first saved under it, with replayed set, so a double submit saves one lead.
-func (s *Store) CreateLead(ctx context.Context, l Lead, idemKey string) (out Lead, replayed bool, err error) {
+func (s *Store) CreateLead(ctx context.Context, l Lead, idemKey string) (Lead, bool, error) {
+	return CreateLead(ctx, s.Pool, l, idemKey)
+}
+
+// CreateLead saves an enquiry within q (a transaction, so its alert can be
+// queued with it).
+func CreateLead(ctx context.Context, q Querier, l Lead, idemKey string) (out Lead, replayed bool, err error) {
 	var key *string
 	if idemKey != "" {
 		key = &idemKey
 	}
-	out, err = scanLead(s.Pool.QueryRow(ctx, `
+	out, err = scanLead(q.QueryRow(ctx, `
 		INSERT INTO leads (id, kind, name, email, phone, organization, payer_name, monthly_claims, payer_contact, message, idempotency_key)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 		RETURNING `+leadCols,
 		NewID("lead"), l.Kind, l.Name, l.Email, l.Phone, l.Organization, l.PayerName, l.MonthlyClaims, l.PayerContact, l.Message, key))
 	if errors.Is(err, pgx.ErrNoRows) && key != nil {
-		out, err = scanLead(s.Pool.QueryRow(ctx, `SELECT `+leadCols+` FROM leads WHERE idempotency_key = $1`, idemKey))
+		out, err = scanLead(q.QueryRow(ctx, `SELECT `+leadCols+` FROM leads WHERE idempotency_key = $1`, idemKey))
 		return out, true, err
 	}
 	return out, false, err
@@ -59,4 +65,14 @@ func (s *Store) ListLeads(ctx context.Context, kind string, limit int) ([]Lead, 
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Lead, error) { return scanLead(r) })
+}
+
+// OperatorEmails are the addresses of Payahub's own operators, who are told
+// about new enquiries.
+func OperatorEmails(ctx context.Context, q Querier) ([]string, error) {
+	rows, err := q.Query(ctx, `SELECT email FROM users WHERE operator ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
 	"github.com/harrisyn/payahub/internal/engine"
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
 )
@@ -47,8 +48,12 @@ type Client = river.Client[pgx.Tx]
 
 // NewClient builds a River client. With workers > 0 it also works jobs;
 // with 0 it only inserts (the API process).
-func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) (*Client, error) {
+func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) (*Client, error) {
+	if mailer == nil {
+		mailer = mail.Log{Logger: logger}
+	}
 	ws := river.NewWorkers()
+	river.AddWorker(ws, &EmailWorker{Sender: mailer})
 	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
 	river.AddWorker(ws, &PayoutWorker{Store: st})
 	river.AddWorker(ws, &BillingWorker{Store: st, Logger: logger})
@@ -60,6 +65,7 @@ func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger
 		cfg.Queues = map[string]river.QueueConfig{
 			SubmissionsQueue: {MaxWorkers: workers},
 			MoneyQueue:       {MaxWorkers: 10},
+			MailQueue:        {MaxWorkers: 5},
 		}
 		cfg.PeriodicJobs = []*river.PeriodicJob{river.NewPeriodicJob(river.PeriodicInterval(billingEvery),
 			func() (river.JobArgs, *river.InsertOpts) { return BillingArgs{}, nil },

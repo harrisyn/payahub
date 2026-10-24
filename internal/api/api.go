@@ -33,6 +33,8 @@ type Server struct {
 	// OCR reads forms on this server to black out the patient's identity
 	// before a model sees them; nil uses the installed Tesseract.
 	OCR deid.OCR
+	// ConsoleURL is the web app's address, for links in email.
+	ConsoleURL string
 }
 
 func (s *Server) Handler() http.Handler {

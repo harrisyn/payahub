@@ -1,11 +1,14 @@
 package api_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/store"
 )
 
@@ -75,5 +78,52 @@ func TestSpecIsPublic(t *testing.T) {
 	b, _ := io.ReadAll(res.Body)
 	if res.StatusCode != 200 || !strings.HasPrefix(string(b), "openapi:") {
 		t.Fatalf("spec: %d %.40q", res.StatusCode, b)
+	}
+}
+
+func TestOperatorsAreEmailedANewEnquiryOnce(t *testing.T) {
+	e := setup(t)
+	_, acct := signup(t, e)
+	addr := acct["email"].(string)
+	if err := st.SetOperator(context.Background(), addr, true); err != nil {
+		t.Fatal(err)
+	}
+	key := store.NewID("lead-mail")
+	body := map[string]any{"kind": "contact", "name": "Kofi\r\nBcc: x@evil.test", "email": "kofi@ridge.test",
+		"phone": "024 555 0101", "organization": "Ridge Clinic " + key, "message": "We send 300 claims a month."}
+	for range 2 {
+		if s, out := (env{srv: e.srv}).do(t, "POST", "/v1/leads", body, "Idempotency-Key", key); s != 201 && s != 200 {
+			t.Fatalf("lead: %d %v", s, out)
+		}
+	}
+	var got []mail.Message
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		got = nil
+		for _, m := range testMail.to(addr) {
+			if strings.Contains(m.Subject, key) {
+				got = append(got, m)
+			}
+		}
+		if len(got) > 0 {
+			break
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("%d alerts for one enquiry", len(got))
+	}
+	m := got[0]
+	if m.Subject != "New enquiry from Ridge Clinic "+key || !strings.Contains(m.Text, "Phone: +233") && !strings.Contains(m.Text, "Phone: 0245550101") ||
+		!strings.Contains(m.Text, "We send 300 claims a month.") || !strings.Contains(m.Text, "kofi@ridge.test") {
+		t.Fatalf("alert: %q\n%s", m.Subject, m.Text)
+	}
+	time.Sleep(300 * time.Millisecond)
+	n := 0
+	for _, m := range testMail.to(addr) {
+		if strings.Contains(m.Subject, key) {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the replay sent another alert: %d", n)
 	}
 }

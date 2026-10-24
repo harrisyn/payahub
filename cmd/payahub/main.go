@@ -29,6 +29,7 @@ import (
 
 	"github.com/harrisyn/payahub/internal/api"
 	_ "github.com/harrisyn/payahub/internal/connector/all"
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/payment"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
@@ -100,12 +101,16 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	if cmd == "dev" || os.Getenv("PAYAHUB_PAYMENTS_SANDBOX") == "1" {
 		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
 	}
+	mailer, err := mailerFrom(logger)
+	if err != nil {
+		return err
+	}
 	go st.WatchCatalog(ctx, 5*time.Second, func(err error) { logger.Warn("catalogue refresh failed", "err", err) })
 	switch cmd {
 	case "api":
-		return serve(ctx, st, v, 0, logger)
+		return serve(ctx, st, v, 0, logger, mailer)
 	case "worker":
-		return work(ctx, st, v, workers, logger)
+		return work(ctx, st, v, workers, logger, mailer)
 	case "dev":
 		if err := st.Migrate(ctx); err != nil {
 			return err
@@ -117,13 +122,27 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 			return err
 		}
 		logger.Info("sandbox ready", "api_key", sandboxKey)
-		return serve(ctx, st, v, workers, logger)
+		return serve(ctx, st, v, workers, logger, mailer)
 	}
 	return fmt.Errorf("unknown command %q", cmd)
 }
 
-func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) error {
-	rc, err := queue.NewClient(st, v, workers, logger)
+// mailerFrom sends through PAYAHUB_SMTP_URL (smtp://user:password@host:587)
+// from PAYAHUB_MAIL_FROM; without them, email is only logged.
+func mailerFrom(logger *slog.Logger) (mail.Sender, error) {
+	raw := os.Getenv("PAYAHUB_SMTP_URL")
+	if raw == "" {
+		return mail.Log{Logger: logger}, nil
+	}
+	m, err := mail.FromURL(raw, env("PAYAHUB_MAIL_FROM", "no-reply@payahub.com"))
+	if err != nil {
+		return nil, fmt.Errorf("PAYAHUB_SMTP_URL: %w", err)
+	}
+	return m, nil
+}
+
+func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) error {
+	rc, err := queue.NewClient(st, v, workers, logger, mailer)
 	if err != nil {
 		return err
 	}
@@ -137,8 +156,8 @@ func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, log
 	return rc.Stop(stopCtx)
 }
 
-func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) error {
-	rc, err := queue.NewClient(st, v, workers, logger)
+func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) error {
+	rc, err := queue.NewClient(st, v, workers, logger, mailer)
 	if err != nil {
 		return err
 	}
@@ -149,7 +168,7 @@ func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, lo
 	}
 	srv := &http.Server{
 		Addr:              env("PAYAHUB_ADDR", ":8080"),
-		Handler:           (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler(),
+		Handler:           (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, ConsoleURL: os.Getenv("PAYAHUB_CONSOLE_URL")}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

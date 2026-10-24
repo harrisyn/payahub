@@ -64,6 +64,9 @@ token, never an API key.
 | `PAYAHUB_VAULT_KEY` | Base64 32-byte key that seals insurer credentials (`openssl rand -base64 32`). Required for `api` and `worker`; `dev` makes a throwaway one if unset. Losing it means re-entering every credential. |
 | `PAYAHUB_ADDR` | Listen address, default `:8080` |
 | `PAYAHUB_WORKERS` | Concurrent submissions per worker process, default 100 |
+| `PAYAHUB_SMTP_URL` | Mail server for Payahub's own email, `smtp://user:password@host:587` (STARTTLS when offered). Unset, email is only logged. Operators get an email for every new enquiry. |
+| `PAYAHUB_MAIL_FROM` | Sender address, default `no-reply@payahub.com` |
+| `PAYAHUB_CONSOLE_URL` | The web app's public address, for links in email |
 | `PAYAHUB_API_URL` | (web) Where the web server finds the API |
 | `NEXT_PUBLIC_SITE_URL` | (web) Canonical site URL for metadata and the sitemap |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | (web) The address the landing page shows |
