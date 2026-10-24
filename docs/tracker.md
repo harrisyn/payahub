@@ -79,7 +79,7 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Duplicate claim detection: the same patient, payer and visit date; an exact copy waits for a person to confirm
 - [x] Filing deadline (60 days, LI 1809, per payer), warning in the last week; a payer can be set to block late claims
 - [x] Confirming issues that await review, recorded with who and why (`POST /v1/claims/{id}/review`)
-- [ ] Claim page: show the checks, confirm buttons, send button
+- [x] Claim page: the checks (to fix, to confirm, worth knowing), confirm with a note, and send with the insurer's answer shown on the page
 
 ## 6. Platform
 

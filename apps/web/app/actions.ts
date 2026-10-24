@@ -754,3 +754,36 @@ export async function saveReadClaim(prev: ReadState, form: FormData): Promise<Re
   revalidatePath("/console/claims");
   redirect(`/console/claims/${res.data.id}`);
 }
+
+export type SendState = FormState & { outcome?: { state: string; final: boolean; message: string; payer_claim_number?: string; error?: { message: string; payer_message?: string } } };
+
+// sendClaim sends a claim and waits up to 20 seconds for the insurer's
+// answer, so the person sees it here rather than on a later visit.
+export async function sendClaim(_: SendState, form: FormData): Promise<SendState> {
+  const id = text(form, "id");
+  const res = await api<{ outcome?: SendState["outcome"] | null }>(`/v1/claims/${encodeURIComponent(id)}/submit?wait=20`, {
+    method: "POST",
+    headers: { "Idempotency-Key": text(form, "key") || crypto.randomUUID() },
+  });
+  revalidatePath(`/console/claims/${id}`);
+  if (!res.ok) return { error: res.error.message };
+  if (!res.data.outcome) return { ok: "Sent. The insurer has not answered yet; this page updates when it does." };
+  return { outcome: res.data.outcome };
+}
+
+// confirmIssues records that a person checked the issues awaiting review.
+export async function confirmIssues(_: FormState, form: FormData): Promise<FormState> {
+  const id = text(form, "id");
+  const confirm = form
+    .getAll("confirm")
+    .map(String)
+    .map((v) => {
+      const at = v.indexOf("|");
+      return { code: v.slice(0, at), field: v.slice(at + 1) };
+    });
+  if (confirm.length === 0) return { error: "Tick what you checked." };
+  const res = await api(`/v1/claims/${encodeURIComponent(id)}/review`, { method: "POST", body: { confirm, note: text(form, "note") } });
+  if (!res.ok) return { error: res.error.message };
+  revalidatePath(`/console/claims/${id}`);
+  return { ok: confirm.length === 1 ? "Confirmed." : `${confirm.length} confirmed.` };
+}
