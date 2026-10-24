@@ -73,6 +73,7 @@ token, never an API key.
 | `NEXT_PUBLIC_SITE_URL` | (web) Canonical site URL for metadata and the sitemap |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | (web) The address the landing page shows |
 | `NEXT_PUBLIC_API_URL` | (web) The public API address shown to developers in the console |
+| `PAYAHUB_APP_URL` | (web) The console's own address, e.g. `https://app.payahub.com`. Set, sign-in and `/console` (operators' super admin at `/console/operator`) move to it from the main domain. Unset, one host serves everything |
 | `PAYAHUB_INSECURE_COOKIES` | (web) `1` drops the Secure flag from session cookies, for the local Docker stack on plain http only |
 
 `NEXT_PUBLIC_` values are written into the web build, so the image takes them as build arguments.

@@ -29,11 +29,11 @@ Secure flag from session cookies. Production never sets it.
 ### What runs
 
 ```
-            Traefik (Dokploy, HTTPS)
-             |                   |
-   WEB_DOMAIN:3000        API_DOMAIN:8080
-             |                   |
-            web ----private---> api        worker x N
+                 Traefik (Dokploy, HTTPS)
+             |              |                |
+   WEB_DOMAIN:3000   APP_DOMAIN:3000   API_DOMAIN:8080
+             \              /                |
+                  web -------private------> api        worker x N
                                  \           /
                                   postgres (volume pgdata)
    migrate: runs once per deploy, before api and worker start
@@ -49,14 +49,19 @@ Secure flag from session cookies. Production never sets it.
   `PAYAHUB_WORKER_REPLICAS` (containers) and `PAYAHUB_WORKERS` (concurrent submissions in each).
   A stopped worker finishes in-flight submissions within 30s (Docker waits 45s); an unfinished job
   is retried by another worker, which asks the payer whether it already has the claim first.
-- **web** is the Next.js server. It talks to the API over the private network
-  (`http://payahub-api:8080`); the browser never gets a token.
+- **web** is the Next.js server, on two hosts. `WEB_DOMAIN` (e.g. `payahub.com`) serves the landing
+  page and docs. `APP_DOMAIN` (e.g. `app.payahub.com`) serves sign-in, sign-up and the console at
+  `/console`; the operators' super admin is part of it, at `app.{domain}/console/operator`, shown
+  only to operators. `/console`, `/signin`, `/start` and `/join` on the main domain redirect to the
+  app host, and the app host's `/` opens the console. Sessions live on the app host only.
+  The web server talks to the API over the private network (`http://payahub-api:8080`); the
+  browser never gets a token.
 - **postgres** keeps its data in the named volume `pgdata`.
 
 ### First deploy
 
-1. **DNS.** Point A records for the web and API hostnames (for example `payahub.com` and
-   `api.payahub.com`) at the Dokploy server.
+1. **DNS.** Point A records for the three hostnames (for example `payahub.com`,
+   `app.payahub.com` and `api.payahub.com`) at the Dokploy server.
 2. **Create the app.** In a Dokploy project: Create Service, Compose, type *Docker Compose* (not
    Stack: Stack mode cannot build images). Provider: GitHub, repository `harrisyn/payahub`, branch
    `main`, compose path `./docker-compose.prod.yml`.
@@ -65,11 +70,12 @@ Secure flag from session cookies. Production never sets it.
    - `PAYAHUB_VAULT_KEY`: `openssl rand -base64 32`. **Keep a copy in your password manager.** It
      seals every organisation's insurer credentials and the model keys; without it they must all be
      entered again.
-   - `WEB_DOMAIN`, `API_DOMAIN`: the hostnames from step 1, without `https://`.
+   - `WEB_DOMAIN`, `APP_DOMAIN`, `API_DOMAIN`: the hostnames from step 1, without `https://`.
    - Email and Paystack when you have them (see the tracker).
    The deploy refuses to start if a required one is missing, and says which.
-4. **Domains.** In the Domains tab add two:
+4. **Domains.** In the Domains tab add three:
    - host = `WEB_DOMAIN`, service `web`, port `3000`, path `/`, HTTPS on, certificate Let's Encrypt
+   - host = `APP_DOMAIN`, service `web`, port `3000`, path `/`, HTTPS on, certificate Let's Encrypt
    - host = `API_DOMAIN`, service `api`, port `8080`, path `/`, HTTPS on, certificate Let's Encrypt
    Dokploy adds the Traefik labels and joins those two services to its network at deploy time
    (Preview Compose shows the result).
@@ -79,12 +85,14 @@ Secure flag from session cookies. Production never sets it.
    `dokploy-network` is never picked up.
 6. **Deploy.** Watch the logs: `migrate` exits 0, `api` turns healthy, then `web`.
 7. **First operator.** In the app's terminal (any backend container, e.g. `api`), after you have
-   signed up on the site:
+   signed up at `https://APP_DOMAIN/start`:
    ```bash
    /payahub operator you@yourdomain.com
    ```
-8. **Check.** `curl https://API_DOMAIN/v1/health` gives `{"status":"ok"}`; sign up on
-   `https://WEB_DOMAIN/start` and send a sandbox claim from the console.
+   The super admin (payers, enquiries, AI models, withdrawals) then shows in your console at
+   `https://APP_DOMAIN/console/operator`.
+8. **Check.** `curl https://API_DOMAIN/v1/health` gives `{"status":"ok"}`; `https://WEB_DOMAIN/signin`
+   lands on `https://APP_DOMAIN/signin`; send a sandbox claim from the console.
 
 Turn on Auto Deploy (GitHub webhook) if every merge to `main` should go out.
 

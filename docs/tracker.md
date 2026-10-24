@@ -107,6 +107,8 @@ each with contract tests against a recorded copy of the platform's API.
       `docker-compose.prod.yml` deploys to Dokploy (migrate before every release, API with healthcheck, scalable
       workers with graceful stop, web on the private network, Postgres on a named volume for backups);
       steps in `docs/deploy.md`; CI builds both images
+- [x] Hosts: landing page and docs on the main domain, sign-in and the console on `app.{domain}` (operators' super admin
+      at `app.{domain}/console/operator`, no separate admin subdomain), API on `api.{domain}`
 - [ ] First production deploy on Dokploy: DNS for the web and API hostnames, secrets set, vault key stored apart, volume backups on
 - [ ] Set PAYAHUB_SMTP_URL and PAYAHUB_MAIL_FROM in production (needs a mail account, e.g. a transactional provider)
 - [x] Team members and roles: owner, admin, claims, finance, developer, viewer; email invitations; every console write checked against the role (a new route is closed until given a permission)

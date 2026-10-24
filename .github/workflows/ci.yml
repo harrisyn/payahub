@@ -59,7 +59,7 @@ jobs:
       - name: compose files
         run: |
           docker compose config -q
-          WEB_DOMAIN=a.test API_DOMAIN=api.a.test POSTGRES_PASSWORD=x PAYAHUB_VAULT_KEY=x \
+          WEB_DOMAIN=a.test APP_DOMAIN=app.a.test API_DOMAIN=api.a.test POSTGRES_PASSWORD=x PAYAHUB_VAULT_KEY=x \
             docker compose -f docker-compose.prod.yml config -q
       - run: docker build -t payahub-backend .
       - run: docker build -t payahub-web apps/web
