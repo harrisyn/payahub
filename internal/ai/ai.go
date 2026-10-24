@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/harrisyn/payahub/internal/deid"
 )
 
 type Kind string
@@ -70,6 +72,27 @@ type Request struct {
 	Schema     map[string]any
 	SchemaName string
 	MaxTokens  int
+	// Cleared vouches that every part passed the de-identifier. A provider
+	// sends nothing it does not cover; the system prompt is Payahub's own.
+	Cleared deid.Cleared
+}
+
+// ErrNotDeidentified is returned, before anything is sent, for a request
+// with a part the de-identifier did not produce.
+var ErrNotDeidentified = errors.New("ai: refused: part of the request did not pass the de-identifier")
+
+// checkCleared is the privacy gate every provider calls first.
+func checkCleared(r Request) error {
+	for _, p := range r.Parts {
+		m := p.Data
+		if m == nil {
+			m = []byte(p.Text)
+		}
+		if !r.Cleared.Covers(m) {
+			return ErrNotDeidentified
+		}
+	}
+	return nil
 }
 
 type Response struct {
@@ -145,6 +168,9 @@ type Router struct {
 }
 
 func (rt Router) Complete(ctx context.Context, r Request) (Response, error) {
+	if err := checkCleared(r); err != nil {
+		return Response{}, err
+	}
 	if len(rt.Providers) == 0 {
 		return Response{}, ErrNoProvider
 	}

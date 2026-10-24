@@ -29,10 +29,12 @@ import (
 
 	"github.com/harrisyn/payahub/internal/api"
 	_ "github.com/harrisyn/payahub/internal/connector/all"
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/payment"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
+	"github.com/harrisyn/payahub/internal/webhook"
 )
 
 const sandboxKey = "sk_sandbox_dev"
@@ -100,12 +102,19 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 	if cmd == "dev" || os.Getenv("PAYAHUB_PAYMENTS_SANDBOX") == "1" {
 		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
 	}
+	mailer, err := mailerFrom(logger)
+	if err != nil {
+		return err
+	}
+	if consoleURL() == "" && cmd != "worker" {
+		logger.Warn("PAYAHUB_CONSOLE_URL is not set: links in invitation emails will not work")
+	}
 	go st.WatchCatalog(ctx, 5*time.Second, func(err error) { logger.Warn("catalogue refresh failed", "err", err) })
 	switch cmd {
 	case "api":
-		return serve(ctx, st, v, 0, logger)
+		return serve(ctx, st, v, 0, logger, mailer)
 	case "worker":
-		return work(ctx, st, v, workers, logger)
+		return work(ctx, st, v, workers, logger, mailer)
 	case "dev":
 		if err := st.Migrate(ctx); err != nil {
 			return err
@@ -117,19 +126,54 @@ func run(ctx context.Context, cmd string, logger *slog.Logger) error {
 			return err
 		}
 		logger.Info("sandbox ready", "api_key", sandboxKey)
-		return serve(ctx, st, v, workers, logger)
+		return serve(ctx, st, v, workers, logger, mailer)
 	}
 	return fmt.Errorf("unknown command %q", cmd)
 }
 
-func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) error {
-	rc, err := queue.NewClient(st, v, workers, logger)
+// mailerFrom sends through PAYAHUB_SMTP_URL (smtp://user:password@host:587)
+// from PAYAHUB_MAIL_FROM; without them, email is only logged.
+func mailerFrom(logger *slog.Logger) (mail.Sender, error) {
+	raw := os.Getenv("PAYAHUB_SMTP_URL")
+	if raw == "" {
+		return mail.Log{Logger: logger, Body: devMode()}, nil
+	}
+	m, err := mail.FromURL(raw, env("PAYAHUB_MAIL_FROM", "no-reply@payahub.com"))
+	if err != nil {
+		return nil, fmt.Errorf("PAYAHUB_SMTP_URL: %w", err)
+	}
+	return m, nil
+}
+
+// privateWebhooks lets webhooks go to http and internal addresses, for
+// development: PAYAHUB_WEBHOOKS_ALLOW_PRIVATE=1, or the dev command.
+func privateWebhooks() bool {
+	return os.Getenv("PAYAHUB_WEBHOOKS_ALLOW_PRIVATE") == "1" || devMode()
+}
+
+func devMode() bool { return len(os.Args) > 1 && os.Args[1] == "dev" }
+
+// consoleURL is the web app's address, for links in email.
+func consoleURL() string {
+	if devMode() {
+		return env("PAYAHUB_CONSOLE_URL", "http://localhost:3000")
+	}
+	return os.Getenv("PAYAHUB_CONSOLE_URL")
+}
+
+func dispatcher(st *store.Store, v *vault.Vault, logger *slog.Logger) *webhook.Dispatcher {
+	return &webhook.Dispatcher{Store: st, Vault: v, HTTP: webhook.Client(privateWebhooks()), Logger: logger}
+}
+
+func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) error {
+	rc, err := queue.NewClient(st, v, workers, logger, mailer)
 	if err != nil {
 		return err
 	}
 	if err := rc.Start(ctx); err != nil {
 		return err
 	}
+	go dispatcher(st, v, logger).Run(ctx)
 	<-ctx.Done()
 	// Finish in-flight submissions; anything unfinished is retried by the next worker.
 	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -137,8 +181,8 @@ func work(ctx context.Context, st *store.Store, v *vault.Vault, workers int, log
 	return rc.Stop(stopCtx)
 }
 
-func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) error {
-	rc, err := queue.NewClient(st, v, workers, logger)
+func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) error {
+	rc, err := queue.NewClient(st, v, workers, logger, mailer)
 	if err != nil {
 		return err
 	}
@@ -146,10 +190,12 @@ func serve(ctx context.Context, st *store.Store, v *vault.Vault, workers int, lo
 		if err := rc.Start(ctx); err != nil {
 			return err
 		}
+		go dispatcher(st, v, logger).Run(ctx)
 	}
 	srv := &http.Server{
-		Addr:              env("PAYAHUB_ADDR", ":8080"),
-		Handler:           (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler(),
+		Addr: env("PAYAHUB_ADDR", ":8080"),
+		Handler: (&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, ConsoleURL: consoleURL(),
+			AllowPrivateWebhooks: privateWebhooks()}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

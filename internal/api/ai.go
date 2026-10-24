@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/harrisyn/payahub/internal/ai"
+	"github.com/harrisyn/payahub/internal/assist"
+	"github.com/harrisyn/payahub/internal/deid"
 	"github.com/harrisyn/payahub/internal/store"
 )
 
@@ -22,6 +24,8 @@ func (s *Server) aiRoutes(mux *http.ServeMux) {
 	mux.Handle("PUT /v1/operator/ai-providers/{id}", s.operator(s.putAIProvider))
 	mux.Handle("DELETE /v1/operator/ai-providers/{id}", s.operator(s.deleteAIProvider))
 	mux.Handle("POST /v1/operator/ai-providers/{id}/check", s.operator(s.checkAIProvider))
+	mux.Handle("GET /v1/operator/ai/checks", s.operator(s.listAIChecks))
+	mux.Handle("POST /v1/operator/ai/checks", s.operator(s.runAIChecks))
 }
 
 var aiID = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,39}$`)
@@ -158,9 +162,11 @@ func (s *Server) checkAIProvider(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		start := time.Now()
 		var res ai.Response
+		ask, cleared := deid.Catalogue(`Answer with {"ok": true}.`)
 		res, err = prov.Complete(ctx, ai.Request{
 			System:     "You are checking that an integration works.",
-			Parts:      []ai.Part{ai.Text(`Answer with {"ok": true}.`)},
+			Parts:      []ai.Part{ai.Text(ask)},
+			Cleared:    cleared,
 			Schema:     map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}, "required": []string{"ok"}, "additionalProperties": false},
 			SchemaName: "check",
 			MaxTokens:  2000,
@@ -190,4 +196,65 @@ func (s *Server) checkAIProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// runAIChecks runs the matching regression checks: on word matching, and on
+// the models set up for code matching when there are any. Each run is kept.
+func (s *Server) runAIChecks(w http.ResponseWriter, r *http.Request) {
+	org := orgFrom(r.Context())
+	cases := assist.Cases()
+	reports := []assist.Report{assist.RunChecks(r.Context(), "words", cases, assist.WordPicker)}
+	models := []string{""}
+	rt, err := s.Store.AIRouter(r.Context(), s.Vault, ai.TaskCodeMatching)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(rt.Providers) > 0 {
+		extendWrite(w, 3*time.Minute+10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+		defer cancel()
+		var used []string
+		pick := assist.ModelPicker(rt, func(runs []assist.Run) {
+			s.recordRuns(ctx, org.ID, runs)
+			for _, run := range runs {
+				if run.Model != "" && !slices.Contains(used, run.Model) {
+					used = append(used, run.Model)
+				}
+			}
+		})
+		reports = append(reports, assist.RunChecks(ctx, "model", cases, pick))
+		slices.Sort(used)
+		models = append(models, strings.Join(used, ", "))
+	}
+	out := []store.AICheckRun{}
+	for i, rep := range reports {
+		raw, err := json.Marshal(rep)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		prompt := ""
+		if rep.Method == "model" {
+			prompt = assist.MatchPrompt
+		}
+		run, err := s.Store.RecordAICheck(r.Context(), store.AICheckRun{Task: ai.TaskCodeMatching, Method: rep.Method,
+			Models: models[i], PromptVersion: prompt, Total: rep.Total, Passed: rep.Passed, Groups: rep.Groups,
+			GroupsPassed: rep.GroupsPassed, Report: raw, RunBy: org.UserID})
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		out = append(out, run)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (s *Server) listAIChecks(w http.ResponseWriter, r *http.Request) {
+	runs, err := s.Store.AIChecks(r.Context(), ai.TaskCodeMatching, 20)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": runs, "cases": len(assist.Cases())})
 }

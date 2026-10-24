@@ -57,6 +57,9 @@ func dataURL(mediaType string, b []byte) string {
 }
 
 func (p *openAI) Complete(ctx context.Context, r Request) (Response, error) {
+	if err := checkCleared(r); err != nil {
+		return Response{}, err
+	}
 	system := r.System
 	if r.Schema != nil && p.cfg.JSONMode != "schema" {
 		schema, _ := json.Marshal(r.Schema)

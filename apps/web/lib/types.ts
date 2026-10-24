@@ -11,31 +11,62 @@ export type Profile = {
   method?: Method;
 };
 
-export type Recommendation = { method: Method; reason: string; available: boolean; fallback?: Method };
+export type Recommendation = {
+  method: Method;
+  reason: string;
+  available: boolean;
+  fallback?: Method;
+};
 
 export type Organization = {
   id: string;
   name: string;
   country: string;
-  plan: "trial" | "flat" | "flat_volume" | "volume" | "enterprise_requested" | "enterprise";
+  plan:
+    | "trial"
+    | "flat"
+    | "flat_volume"
+    | "volume"
+    | "enterprise_requested"
+    | "enterprise";
   trial_ends_at: string | null;
   profile: Profile | null;
-  user: { id: string; name: string; email: string };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: Role;
+    permissions: Perm[];
+  };
   created_at: string;
 };
 
-export type Usage = { month: string; billable_live: number; sandbox_claims: number; live_claims: number; trial_live_limit: number };
+export type Usage = {
+  month: string;
+  billable_live: number;
+  sandbox_claims: number;
+  live_claims: number;
+  trial_live_limit: number;
+};
 
 export type OrgView = {
   organization: Organization;
   usage: Usage;
   recommendation?: Recommendation;
-  onboarding: { id: "account" | "profile" | "payers" | "items" | "first_claim" | "go_live"; done: boolean }[];
+  onboarding: {
+    id: "account" | "profile" | "payers" | "items" | "first_claim" | "go_live";
+    done: boolean;
+  }[];
   // Operators run Payahub and edit the shared catalogue.
   operator: boolean;
 };
 
-export type CredentialField = { name: string; label: string; secret: boolean; required: boolean };
+export type CredentialField = {
+  name: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+};
 
 // A connector reaches payers: a platform carries many (XCeli, Medserve...),
 // a direct one is a single payer's own interface.
@@ -59,13 +90,21 @@ export type Payer = {
   name: string;
   country: string;
   kind: "standalone" | "integrated";
-  connector: { id: string; name: string; kind: "platform" | "direct"; status: "available" | "porting" };
+  connector: {
+    id: string;
+    name: string;
+    kind: "platform" | "direct";
+    status: "available" | "porting";
+  };
   status: "available" | "connecting";
   member_otp_required: boolean;
   capabilities: string[];
   coded_items: number;
   notes?: string;
+  rules: { price_policy: Policy; unlisted_policy: Policy; has_list: boolean };
 };
+
+export type Policy = "warn" | "block";
 
 export type PayerSetting = {
   payer_id: string;
@@ -85,7 +124,13 @@ export type ConnectorAccount = {
   updated_at: string;
 };
 
-export type ItemKind = "service" | "lab" | "imaging" | "procedure" | "medication" | "consumable";
+export type ItemKind =
+  | "service"
+  | "lab"
+  | "imaging"
+  | "procedure"
+  | "medication"
+  | "consumable";
 
 export type Item = {
   id: string;
@@ -98,9 +143,20 @@ export type Item = {
   codes?: { system: string; value: string }[];
 };
 
-export type Suggestion = { item: Item; confidence: number };
+export type Suggestion = {
+  item: Item;
+  confidence: number;
+  source?: "words" | "model";
+  reason?: string;
+};
 
-export type ItemMapping = { local_code: string; local_name: string; item_id: string; confirmed_by: string; updated_at: string };
+export type ItemMapping = {
+  local_code: string;
+  local_name: string;
+  item_id: string;
+  confirmed_by: string;
+  updated_at: string;
+};
 
 export type APIKey = {
   id: string;
@@ -113,8 +169,17 @@ export type APIKey = {
 };
 
 export type ClaimState =
-  | "draft" | "mapped" | "validated" | "needs_review" | "ready" | "submitted"
-  | "acknowledged" | "approved" | "rejected" | "paid" | "withdrawn";
+  | "draft"
+  | "mapped"
+  | "validated"
+  | "needs_review"
+  | "ready"
+  | "submitted"
+  | "acknowledged"
+  | "approved"
+  | "rejected"
+  | "paid"
+  | "withdrawn";
 
 export type ClaimSummary = {
   id: string;
@@ -129,7 +194,14 @@ export type ClaimSummary = {
   updated_at: string;
 };
 
-export type ClaimEvent = { id: number; kind: string; from_state?: string; to_state: string; detail?: unknown; created_at: string };
+export type ClaimEvent = {
+  id: number;
+  kind: string;
+  from_state?: string;
+  to_state: string;
+  detail?: unknown;
+  created_at: string;
+};
 
 // The operator's view of a catalogue payer: its settings on its connector and
 // how far its codes are mapped.
@@ -138,10 +210,21 @@ export type OpPayer = Payer & {
   inactive: boolean;
   missing_fields: string[];
   list_size: number;
+  list_rules: number;
   total_items: number;
 };
 
-export type ListEntry = { code: string; name: string; group?: string; price?: number };
+export type ListEntry = {
+  code: string;
+  name: string;
+  group?: string;
+  price?: number;
+  max_quantity?: number;
+  sex?: "female" | "male";
+  min_age?: number;
+  max_age?: number;
+  needs_authorization?: boolean;
+};
 
 export type ItemCode = {
   item: Item;
@@ -149,6 +232,25 @@ export type ItemCode = {
   in_list?: boolean;
   generated?: boolean;
   suggestions: (ListEntry & { confidence: number })[];
+  model_pick?: CodePick;
+};
+
+export type CodePick = {
+  item_id: string;
+  code: string;
+  name: string;
+  confidence: number;
+  reason: string;
+  model: string;
+  prompt_version: string;
+  created_at: string;
+};
+
+export type DiagnosisSuggestion = {
+  code: Diagnosis;
+  confidence: number;
+  source: "words" | "model";
+  reason?: string;
 };
 
 export type PayerCodes = {
@@ -158,7 +260,13 @@ export type PayerCodes = {
 };
 
 export type CatalogChange = {
-  kind: "payer_created" | "payer_updated" | "codes_changed" | "list_loaded" | "seed";
+  kind:
+    | "payer_created"
+    | "payer_updated"
+    | "codes_changed"
+    | "list_loaded"
+    | "rules_changed"
+    | "seed";
   detail: Record<string, unknown>;
   changed_by: string;
   changed_at: string;
@@ -177,7 +285,11 @@ export type Price = {
 
 export type Diagnosis = { code: string; title: string; billable: boolean };
 
-export type PlanPrice = { monthly_fee: number; per_claim: number; included: number };
+export type PlanPrice = {
+  monthly_fee: number;
+  per_claim: number;
+  included: number;
+};
 export type Wallet = {
   currency: string;
   balance: number;
@@ -192,7 +304,13 @@ export type Wallet = {
 export type WalletEntry = {
   seq: number;
   transaction_id: string;
-  kind: "funding" | "charge" | "fee" | "withdrawal" | "withdrawal_returned" | "adjustment";
+  kind:
+    | "funding"
+    | "charge"
+    | "fee"
+    | "withdrawal"
+    | "withdrawal_returned"
+    | "adjustment";
   memo: string;
   amount: number;
   balance_after: number;
@@ -220,7 +338,11 @@ export type PaymentProvider = {
   payouts: boolean;
   sandbox: boolean;
 };
-export type Bank = { code: string; name: string; type: "bank" | "mobile_money" };
+export type Bank = {
+  code: string;
+  name: string;
+  type: "bank" | "mobile_money";
+};
 export type PayoutAccount = {
   id: string;
   provider: string;
@@ -231,7 +353,13 @@ export type PayoutAccount = {
   account_number: string;
   currency: string;
 };
-export type WithdrawalStatus = "requested" | "approved" | "paying" | "paid" | "failed" | "rejected";
+export type WithdrawalStatus =
+  | "requested"
+  | "approved"
+  | "paying"
+  | "paid"
+  | "failed"
+  | "rejected";
 export type Withdrawal = {
   id: string;
   organization_id: string;
@@ -272,4 +400,185 @@ export type AIProvider = {
   check_ok?: boolean;
   check_message?: string;
   updated_at: string;
+};
+
+export type ReadField = {
+  confidence: number;
+  quote?: string;
+  read?: string;
+  note?: string;
+  needs_review: boolean;
+};
+
+export type ClaimInput = {
+  payer_id: string;
+  currency: string;
+  member: {
+    member_number: string;
+    policy_number?: string;
+    first_name?: string;
+    last_name?: string;
+    birth_date?: string;
+    gender?: string;
+  };
+  provider: { name: string };
+  encounter: { type?: string; start_date: string; end_date?: string };
+  lines: {
+    description: string;
+    code?: { system: string; value: string; display?: string };
+    quantity: number;
+    unit_price: number;
+    service_date?: string;
+  }[];
+  diagnoses: {
+    code: { system: string; value: string; display?: string };
+    role?: string;
+    description?: string;
+  }[];
+  authorization_code?: string;
+};
+
+export type Extraction = {
+  claim: ClaimInput;
+  fields: Record<string, ReadField>;
+  payer_name?: string;
+  review: number;
+  evidence: {
+    model_version?: string;
+    prompt_version?: string;
+    confidence?: number;
+  };
+  // What was blacked out on Payahub's server before the model saw the form.
+  privacy?: {
+    method: string;
+    removed?: Record<string, number>;
+    pages?: number;
+  };
+  redacted_pages?: string[];
+};
+
+export type AIUsage = {
+  task: string;
+  provider: string;
+  model: string;
+  runs: number;
+  failed: number;
+  input_tokens: number;
+  output_tokens: number;
+  avg_ms: number;
+};
+
+export type WebhookEndpoint = {
+  id: string;
+  environment: "sandbox" | "live";
+  url: string;
+  description: string;
+  enabled: boolean;
+  created_at: string;
+  delivered_24h: number;
+  failing: number;
+  last_error?: string;
+  last_delivered_at?: string;
+};
+
+export type WebhookDelivery = {
+  id: number;
+  event_type: string;
+  status: "pending" | "delivered" | "failed";
+  attempts: number;
+  last_status?: number;
+  last_error?: string;
+  created_at: string;
+  delivered_at?: string;
+  payload: {
+    id: string;
+    type: string;
+    data?: { claim_id?: string; state?: string };
+  };
+};
+
+export type Role =
+  | "owner"
+  | "admin"
+  | "claims"
+  | "finance"
+  | "developer"
+  | "viewer";
+export type Perm = "claims" | "setup" | "billing" | "developers" | "team";
+
+export type Member = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  created_at: string;
+};
+
+export type Invitation = {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  invited_by: string;
+  created_at: string;
+  expires_at: string;
+};
+
+export type InvitationView = {
+  organization: string;
+  email: string;
+  name: string;
+  role: Role;
+  invited_by: string;
+  expires_at: string;
+};
+
+export type MemberVerification = {
+  eligible: boolean;
+  member: { member_number: string; first_name?: string; last_name?: string };
+  plan_name?: string;
+  otp_required: boolean;
+  reason?: string;
+  message?: string;
+  cover_ends?: string;
+};
+
+export type MemberCheck = {
+  id: string;
+  environment: "sandbox" | "live";
+  payer_id: string;
+  member_number: string;
+  action: "verify" | "send_otp";
+  status: "pending" | "done" | "failed";
+  result?: MemberVerification & { challenge?: string };
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+};
+
+export type AICheckCase = {
+  name: string;
+  want: string;
+  got: string;
+  confidence: number;
+  answered: boolean;
+};
+
+export type AICheckRun = {
+  id: number;
+  method: "words" | "model";
+  models: string;
+  prompt_version: string;
+  total: number;
+  passed: number;
+  groups: number;
+  groups_passed: number;
+  report: {
+    failures: AICheckCase[];
+    group_failures: { group: string; cases: string[]; got: string[] }[];
+    took_ms: number;
+    error?: string;
+  };
+  run_by: string;
+  created_at: string;
 };

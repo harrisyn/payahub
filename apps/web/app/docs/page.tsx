@@ -21,10 +21,12 @@ const endpoints = [
   { m: "GET", p: "/v1/connectors", d: "The platforms and insurer interfaces, with the account fields each needs." },
   { m: "GET", p: "/v1/items", d: "The standard list of services, lab tests, imaging, procedures, medicines and consumables. Filter with kind or q." },
   { m: "GET", p: "/v1/items/{id}", d: "One standard item and each insurer's code for it." },
-  { m: "POST", p: "/v1/items/suggest", d: "Suggest standard items for your own items (code and name), with a confidence for each." },
+  { m: "POST", p: "/v1/items/suggest", d: "Suggest standard items for your own items (code and name), with a confidence for each. A model picks first when one is set up." },
+  { m: "POST", p: "/v1/claims/extract", d: "Read a PDF or photo of a claim form into a proposed claim, each field with its confidence. Nothing is saved." },
   { m: "GET", p: "/v1/item-mappings", d: "Your codes mapped to standard items." },
-  { m: "PUT", p: "/v1/item-mappings", d: "Save up to 500 mappings at once, all or none. Safe to repeat." },
+  { m: "PUT", p: "/v1/item-mappings", d: "Save up to 500 mappings at once, all or none. Safe to repeat. Unsent claims waiting on these codes are checked again." },
   { m: "DELETE", p: "/v1/item-mappings/{code}", d: "Remove one mapping." },
+  { m: "GET", p: "/v1/review-queue", d: "What holds unsent claims back: your codes with no standard item (mapping one rechecks every claim waiting on it) and claims waiting for a person to confirm." },
   { m: "GET", p: "/v1/health", d: "Service health." },
 ];
 

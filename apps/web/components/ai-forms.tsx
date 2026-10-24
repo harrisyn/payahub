@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 
 import { saveAIProvider, type FormState } from "@/app/actions";
 import { Field, Messages, Submit } from "@/components/forms";
+import { Select } from "@/components/ui";
 import { taskName } from "@/lib/ai";
 import type { AIKind, AIProvider } from "@/lib/types";
 
@@ -114,41 +115,35 @@ export function AIProviderForm({
           placeholder={kind === "anthropic" ? defaultModel : "gpt-5"}
         />
         {kind === "anthropic" ? (
-          <div className="field">
-            <label htmlFor="f-effort">Effort</label>
-            <select
-              id="f-effort"
-              name="effort"
-              defaultValue={val("effort", provider?.effort || "") || "high"}
-              aria-invalid={!!err("effort")}
-            >
-              <option value="low">Low, fastest</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="xhigh">Extra high</option>
-              <option value="max">Max, slowest</option>
-            </select>
-            {err("effort") && <p className="field__error">{err("effort")}</p>}
-          </div>
+          <Select
+            id="f-effort"
+            name="effort"
+            label="Effort"
+            defaultValue={val("effort", provider?.effort || "") || "high"}
+            error={err("effort")}
+            data={[
+              { value: "low", label: "Low, fastest" },
+              { value: "medium", label: "Medium" },
+              { value: "high", label: "High" },
+              { value: "xhigh", label: "Extra high" },
+              { value: "max", label: "Max, slowest" },
+            ]}
+          />
         ) : (
-          <div className="field">
-            <label htmlFor="f-json">Structured answers</label>
-            <select
-              id="f-json"
-              name="json_mode"
-              defaultValue={
-                val("json_mode", provider?.json_mode || "") || "schema"
-              }
-              aria-invalid={!!err("json_mode")}
-            >
-              <option value="schema">JSON schema (strict)</option>
-              <option value="object">JSON object</option>
-              <option value="none">Plain text, parsed</option>
-            </select>
-            {err("json_mode") && (
-              <p className="field__error">{err("json_mode")}</p>
-            )}
-          </div>
+          <Select
+            id="f-json"
+            name="json_mode"
+            label="Structured answers"
+            defaultValue={
+              val("json_mode", provider?.json_mode || "") || "schema"
+            }
+            error={err("json_mode")}
+            data={[
+              { value: "schema", label: "JSON schema (strict)" },
+              { value: "object", label: "JSON object" },
+              { value: "none", label: "Plain text, parsed" },
+            ]}
+          />
         )}
       </div>
       <Field

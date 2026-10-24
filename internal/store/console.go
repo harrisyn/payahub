@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/harrisyn/payahub/internal/access"
 	"github.com/harrisyn/payahub/internal/claim"
 	"github.com/harrisyn/payahub/internal/onboarding"
 )
@@ -151,7 +152,7 @@ func insertKey(ctx context.Context, q Querier, orgID, env, name, raw string) err
 // Login checks a password and opens a session.
 func (s *Store) Login(ctx context.Context, email, password string) (string, error) {
 	var userID, orgID, hash string
-	err := s.Pool.QueryRow(ctx, `SELECT id, organization_id, password_hash FROM users WHERE lower(email) = lower($1)`,
+	err := s.Pool.QueryRow(ctx, `SELECT id, organization_id, password_hash FROM users WHERE lower(email) = lower($1) AND removed_at IS NULL`,
 		email).Scan(&userID, &orgID, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		checkPassword(dummyHash, password)
@@ -177,10 +178,10 @@ func (s *Store) Logout(ctx context.Context, token string) error {
 func (s *Store) authenticateSession(ctx context.Context, h []byte) (Org, error) {
 	o := Org{Environment: "sandbox", Session: true}
 	err := s.Pool.QueryRow(ctx, `
-		SELECT s.organization_id, s.user_id, u.operator
+		SELECT s.organization_id, s.user_id, u.operator, u.role
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token_sha256 = $1 AND s.expires_at > now()`, h).
-		Scan(&o.ID, &o.UserID, &o.Operator)
+		WHERE s.token_sha256 = $1 AND s.expires_at > now() AND u.removed_at IS NULL`, h).
+		Scan(&o.ID, &o.UserID, &o.Operator, &o.Role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Org{}, ErrUnauthenticated
 	}
@@ -196,9 +197,11 @@ type Organization struct {
 	TrialEndsAt *time.Time          `json:"trial_ends_at"`
 	Profile     *onboarding.Profile `json:"profile"`
 	User        struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Email string `json:"email"`
+		ID    string        `json:"id"`
+		Name  string        `json:"name"`
+		Email string        `json:"email"`
+		Role  access.Role   `json:"role"`
+		Perms []access.Perm `json:"permissions"`
 	} `json:"user"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -208,17 +211,18 @@ func (s *Store) Organization(ctx context.Context, orgID, userID string) (*Organi
 	var profile []byte
 	err := s.Pool.QueryRow(ctx, `
 		SELECT o.id, o.name, o.country, o.plan, o.trial_ends_at, o.profile, o.created_at,
-		       coalesce(u.id, ''), coalesce(u.name, ''), coalesce(u.email, '')
+		       coalesce(u.id, ''), coalesce(u.name, ''), coalesce(u.email, ''), coalesce(u.role, '')
 		FROM organizations o LEFT JOIN users u ON u.id = $2 AND u.organization_id = o.id
 		WHERE o.id = $1`, orgID, userID).
 		Scan(&o.ID, &o.Name, &o.Country, &o.Plan, &o.TrialEndsAt, &profile, &o.CreatedAt,
-			&o.User.ID, &o.User.Name, &o.User.Email)
+			&o.User.ID, &o.User.Name, &o.User.Email, &o.User.Role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	o.User.Perms = access.Perms(o.User.Role)
 	if profile != nil {
 		o.Profile = &onboarding.Profile{}
 		if err := json.Unmarshal(profile, o.Profile); err != nil {

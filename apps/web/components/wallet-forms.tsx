@@ -10,6 +10,7 @@ import {
   type FormState,
 } from "@/app/actions";
 import { Field, Messages, Submit } from "@/components/forms";
+import { Select, TextInput } from "@/components/ui";
 import type { Bank, PaymentProvider, PayoutAccount } from "@/lib/types";
 
 const QUICK = [200, 500, 1000, 2000];
@@ -57,24 +58,14 @@ export function AddFundsForm({
         ))}
       </div>
       {providers.length > 1 ? (
-        <div className="field">
-          <label htmlFor="f-provider">Pay with</label>
-          <select
-            id="f-provider"
-            name="provider"
-            defaultValue={providers[0].id}
-            aria-invalid={!!s.fields?.provider}
-          >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {s.fields?.provider && (
-            <p className="field__error">{s.fields.provider}</p>
-          )}
-        </div>
+        <Select
+          id="f-provider"
+          name="provider"
+          label="Pay with"
+          defaultValue={providers[0].id}
+          error={s.fields?.provider}
+          data={providers.map((p) => ({ value: p.id, label: p.name }))}
+        />
       ) : (
         <input type="hidden" name="provider" value={providers[0].id} />
       )}
@@ -113,21 +104,14 @@ export function PayoutAccountForm({
   return (
     <form action={action} className="app-form" noValidate>
       {providers.length > 1 ? (
-        <div className="field">
-          <label htmlFor="f-pprovider">Paid through</label>
-          <select
-            id="f-pprovider"
-            name="provider"
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Select
+          id="f-pprovider"
+          name="provider"
+          label="Paid through"
+          value={provider}
+          onChange={(v) => v && setProvider(v)}
+          data={providers.map((p) => ({ value: p.id, label: p.name }))}
+        />
       ) : (
         <input type="hidden" name="provider" value={provider} />
       )}
@@ -146,26 +130,15 @@ export function PayoutAccountForm({
           </label>
         ))}
       </fieldset>
-      <div className="field">
-        <label htmlFor="f-bank">{type === "bank" ? "Bank" : "Network"}</label>
-        <select
-          id="f-bank"
-          name="bank_code"
-          key={`${provider}-${type}`}
-          defaultValue=""
-          aria-invalid={!!err("bank_code")}
-        >
-          <option value="" disabled>
-            {type === "bank" ? "Choose the bank" : "Choose the network"}
-          </option>
-          {options.map((b) => (
-            <option key={b.code} value={b.code}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        {err("bank_code") && <p className="field__error">{err("bank_code")}</p>}
-      </div>
+      <Select
+        id="f-bank"
+        name="bank_code"
+        key={`${provider}-${type}`}
+        label={type === "bank" ? "Bank" : "Network"}
+        placeholder={type === "bank" ? "Choose the bank" : "Choose the network"}
+        error={err("bank_code")}
+        data={options.map((b) => ({ value: b.code, label: b.name }))}
+      />
       <div className="app-form__row">
         <Field
           label={type === "bank" ? "Account number" : "Mobile money number"}
@@ -201,24 +174,18 @@ export function WithdrawForm({
   const err = (k: string) => s.fields?.[k];
   return (
     <form action={action} className="app-form" noValidate>
-      <div className="field">
-        <label htmlFor="f-pa">Pay to</label>
-        <select
-          id="f-pa"
-          name="payout_account_id"
-          defaultValue={accounts[0]?.id}
-          aria-invalid={!!err("payout_account_id")}
-        >
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.bank_name || a.bank_code} {a.account_number} ({a.name})
-            </option>
-          ))}
-        </select>
-        {err("payout_account_id") && (
-          <p className="field__error">{err("payout_account_id")}</p>
-        )}
-      </div>
+      <Select
+        id="f-pa"
+        name="payout_account_id"
+        label="Pay to"
+        defaultValue={accounts[0]?.id}
+        error={err("payout_account_id")}
+        data={accounts.map((a) => ({
+          value: a.id,
+          label: `${a.bank_name || a.bank_code} ${a.account_number}`,
+          description: a.name,
+        }))}
+      />
       <div className="app-form__row">
         <Field
           label="Amount (GHS)"
@@ -269,15 +236,14 @@ export function DecideWithdrawal({ id }: { id: string }) {
         <form action={action} className="app-inline-form" noValidate>
           <input type="hidden" name="id" value={id} />
           <input type="hidden" name="decision" value="reject" />
-          <div className="field field--inline">
-            <label htmlFor={`r-${id}`}>Why (they see this)</label>
-            <input
-              id={`r-${id}`}
-              name="reason"
-              aria-invalid={!!s.fields?.reason}
-              placeholder="Confirm the account by phone first"
-            />
-          </div>
+          <TextInput
+            id={`r-${id}`}
+            name="reason"
+            label="Why (they see this)"
+            error={s.fields?.reason}
+            placeholder="Confirm the account by phone first"
+            className="app-inline-form__grow"
+          />
           <Submit className="app-button">Reject</Submit>
           <button
             type="button"

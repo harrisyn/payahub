@@ -1,13 +1,13 @@
 import Link from "next/link";
 
-import { checkAIProvider, deleteAIProvider } from "@/app/actions";
+import { checkAIProvider, deleteAIProvider, runAIChecks } from "@/app/actions";
 import { AIProviderForm } from "@/components/ai-forms";
 import { Submit } from "@/components/forms";
 import { taskName } from "@/lib/ai";
 import { api } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 import { requireOperator } from "@/lib/session";
-import type { AIProvider } from "@/lib/types";
+import type { AICheckRun, AIProvider, AIUsage, Item } from "@/lib/types";
 
 export const metadata = { title: "AI models" };
 
@@ -30,6 +30,24 @@ export default async function AIModels({
     default_models: Record<string, string>;
   }>("/v1/operator/ai-providers");
   if (!res.ok) throw new Error(res.error.message);
+  const ur = await api<{ data: AIUsage[]; days: number }>(
+    "/v1/operator/ai-usage",
+  );
+  const usage = ur.ok ? ur.data.data : [];
+  const [cr, ir] = await Promise.all([
+    api<{ data: AICheckRun[]; cases: number }>("/v1/operator/ai/checks"),
+    api<{ data: Item[] }>("/v1/items"),
+  ]);
+  const checks = cr.ok ? cr.data.data : [];
+  const cases = cr.ok ? cr.data.cases : 0;
+  const itemName = new Map(
+    (ir.ok ? ir.data.data : []).map((it) => [it.id, it.name]),
+  );
+  const latest = {
+    model: checks.find((c) => c.method === "model"),
+    words: checks.find((c) => c.method === "words"),
+  };
+  const shown = latest.model ?? latest.words;
   const { data: providers, tasks, default_models } = res.data;
   const editing = edit ? providers.find((p) => p.id === edit) : undefined;
   const justSaved = saved ? providers.find((p) => p.id === saved) : undefined;
@@ -188,6 +206,176 @@ export default async function AIModels({
           )}
         </section>
       </div>
+
+      <section className="app-card" aria-labelledby="chk-h">
+        <div className="app-card__head">
+          <div>
+            <h2 id="chk-h" className="app-card__title">
+              Matching checks
+            </h2>
+            <p className="app-muted app-measure">
+              {cases} clinic names with known answers, among them names that
+              differ only in strength or form and must get different items. Run
+              them after changing a model, a provider or their order.
+            </p>
+          </div>
+          <form action={runAIChecks}>
+            <Submit className="app-button app-button--primary">
+              Run the checks
+            </Submit>
+          </form>
+        </div>
+        {checks.length === 0 ? (
+          <p className="app-empty">Not run yet.</p>
+        ) : (
+          <>
+            <dl className="app-strip">
+              {(["model", "words"] as const).map((m) => {
+                const c = latest[m];
+                return (
+                  <div key={m}>
+                    <dt>
+                      {m === "model"
+                        ? c?.models || "Model"
+                        : "Word matching (fallback)"}
+                    </dt>
+                    <dd>
+                      {c ? (
+                        <>
+                          {c.passed}{" "}
+                          <span className="app-unit">of {c.total} right</span>
+                        </>
+                      ) : (
+                        <span className="app-dash">–</span>
+                      )}
+                    </dd>
+                    {c && (
+                      <p className="app-muted">
+                        {c.report.error
+                          ? `Could not answer: ${c.report.error}`
+                          : `${c.groups_passed} of ${c.groups} groups told apart · ${dateTime(c.created_at)}`}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </dl>
+            {shown && shown.report.failures.length > 0 && (
+              <table className="app-table app-table--stack">
+                <caption className="app-caption">
+                  What{" "}
+                  {shown.method === "model" ? shown.models : "word matching"}{" "}
+                  got wrong
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Clinic name</th>
+                    <th scope="col">Should be</th>
+                    <th scope="col">Got</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.report.failures.slice(0, 12).map((f) => (
+                    <tr key={f.name}>
+                      <td className="app-strong">{f.name}</td>
+                      <td>
+                        {f.want ? (
+                          (itemName.get(f.want) ?? f.want)
+                        ) : (
+                          <span className="app-muted">Nothing</span>
+                        )}
+                      </td>
+                      <td className="app-bad">
+                        {!f.answered
+                          ? "No answer"
+                          : f.got
+                            ? `${itemName.get(f.got) ?? f.got} (${Math.round(f.confidence * 100)}%)`
+                            : "Nothing"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {shown && shown.report.failures.length > 12 && (
+              <p className="app-muted">
+                And {shown.report.failures.length - 12} more.
+              </p>
+            )}
+            {checks.length > 2 && (
+              <details className="app-details">
+                <summary>Earlier runs</summary>
+                <ul className="app-list">
+                  {checks.slice(0, 12).map((c) => (
+                    <li key={c.id}>
+                      {dateTime(c.created_at)}:{" "}
+                      {c.method === "model" ? c.models : "word matching"},{" "}
+                      {c.passed} of {c.total} right, {c.groups_passed} of{" "}
+                      {c.groups} groups, by {c.run_by}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className="app-card" aria-labelledby="use-h">
+        <h2 id="use-h" className="app-card__title">
+          Use in the last 30 days
+        </h2>
+        {usage.length ? (
+          <table className="app-table">
+            <thead>
+              <tr>
+                <th scope="col">Task</th>
+                <th scope="col">Model</th>
+                <th scope="col" className="app-right">
+                  Calls
+                </th>
+                <th scope="col" className="app-right">
+                  Failed
+                </th>
+                <th scope="col" className="app-right">
+                  Tokens in / out
+                </th>
+                <th scope="col" className="app-right">
+                  Average time
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.map((u) => (
+                <tr key={`${u.task}-${u.provider}-${u.model}`}>
+                  <td>{taskName[u.task]?.[0] ?? u.task}</td>
+                  <td>
+                    {u.model || <span className="app-muted">No answer</span>}
+                    {u.provider && (
+                      <span className="app-muted"> via {u.provider}</span>
+                    )}
+                  </td>
+                  <td className="app-right">
+                    {u.runs.toLocaleString("en-GH")}
+                  </td>
+                  <td className={`app-right${u.failed ? " field__error" : ""}`}>
+                    {u.failed.toLocaleString("en-GH")}
+                  </td>
+                  <td className="app-right app-nowrap">
+                    {u.input_tokens.toLocaleString("en-GH")} /{" "}
+                    {u.output_tokens.toLocaleString("en-GH")}
+                  </td>
+                  <td className="app-right">
+                    {(u.avg_ms / 1000).toFixed(1)} s
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="app-empty">No model has been asked anything yet.</p>
+        )}
+      </section>
     </div>
   );
 }

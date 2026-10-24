@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -93,18 +94,18 @@ func LoadCatalog(ctx context.Context, q Querier) (catalog.Data, error) {
 		return d, err
 	}
 	rows, err = q.Query(ctx, `
-		SELECT id, name, country, connector, fields, notes, generated_codes, inactive FROM catalog_payers ORDER BY id`)
+		SELECT id, name, country, connector, fields, notes, generated_codes, inactive, rules FROM catalog_payers ORDER BY id`)
 	if err != nil {
 		return d, err
 	}
 	for rows.Next() {
 		var p catalog.Payer
-		var fields []byte
-		if err := rows.Scan(&p.ID, &p.Name, &p.Country, &p.Connector, &fields, &p.Notes, &p.GeneratedCodes, &p.Inactive); err != nil {
+		var fields, rules []byte
+		if err := rows.Scan(&p.ID, &p.Name, &p.Country, &p.Connector, &fields, &p.Notes, &p.GeneratedCodes, &p.Inactive, &rules); err != nil {
 			rows.Close()
 			return d, err
 		}
-		if err := json.Unmarshal(fields, &p.Fields); err != nil {
+		if err := errors.Join(json.Unmarshal(fields, &p.Fields), json.Unmarshal(rules, &p.Rules)); err != nil {
 			rows.Close()
 			return d, err
 		}
@@ -132,14 +133,17 @@ func LoadCatalog(ctx context.Context, q Querier) (catalog.Data, error) {
 	if err := rows.Err(); err != nil {
 		return d, err
 	}
-	rows, err = q.Query(ctx, `SELECT payer_id, code, name, grp, price FROM catalog_payer_lists ORDER BY payer_id, position`)
+	rows, err = q.Query(ctx, `
+		SELECT payer_id, code, name, grp, price, max_quantity, sex, min_age, max_age, needs_authorization
+		FROM catalog_payer_lists ORDER BY payer_id, position`)
 	if err != nil {
 		return d, err
 	}
 	for rows.Next() {
 		var payer string
 		var e catalog.ListEntry
-		if err := rows.Scan(&payer, &e.Code, &e.Name, &e.Group, &e.Price); err != nil {
+		if err := rows.Scan(&payer, &e.Code, &e.Name, &e.Group, &e.Price,
+			&e.MaxQuantity, &e.Sex, &e.MinAge, &e.MaxAge, &e.NeedsAuthorization); err != nil {
 			rows.Close()
 			return d, err
 		}
@@ -296,19 +300,47 @@ func (s *Store) SetPayerCodes(ctx context.Context, payerID string, changes []Cod
 
 // ReplacePayerList stores a payer's own code list, replacing the last one.
 func (s *Store) ReplacePayerList(ctx context.Context, payerID string, entries []catalog.ListEntry, by string) error {
+	limited := 0
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM catalog_payer_lists WHERE payer_id = $1`, payerID); err != nil {
 			return err
 		}
 		rows := make([][]any, len(entries))
 		for i, e := range entries {
-			rows[i] = []any{payerID, i, e.Code, e.Name, e.Group, e.Price}
+			rows[i] = []any{payerID, i, e.Code, e.Name, e.Group, e.Price, e.MaxQuantity, e.Sex, e.MinAge, e.MaxAge, e.NeedsAuthorization}
+			if e.Limited() {
+				limited++
+			}
 		}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"catalog_payer_lists"},
-			[]string{"payer_id", "position", "code", "name", "grp", "price"}, pgx.CopyFromRows(rows)); err != nil {
+			[]string{"payer_id", "position", "code", "name", "grp", "price", "max_quantity", "sex", "min_age", "max_age",
+				"needs_authorization"}, pgx.CopyFromRows(rows)); err != nil {
 			return err
 		}
-		return logChange(ctx, tx, payerID, "list_loaded", by, map[string]int{"entries": len(entries)})
+		return logChange(ctx, tx, payerID, "list_loaded", by, map[string]int{"entries": len(entries), "with_rules": limited})
+	})
+	if err != nil {
+		return err
+	}
+	return s.RefreshCatalog(ctx)
+}
+
+// SavePayerRules sets how strictly the payer's list applies to claims.
+func (s *Store) SavePayerRules(ctx context.Context, payerID string, r catalog.PayerRules, by string) error {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE catalog_payers SET rules = $2, updated_by = $3, updated_at = now() WHERE id = $1`,
+			payerID, raw, by)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return logChange(ctx, tx, payerID, "rules_changed", by, r)
 	})
 	if err != nil {
 		return err

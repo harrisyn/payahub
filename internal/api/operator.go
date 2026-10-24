@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/harrisyn/payahub/internal/ai"
+	"github.com/harrisyn/payahub/internal/assist"
 	"github.com/harrisyn/payahub/internal/catalog"
 	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/store"
@@ -27,7 +31,10 @@ func (s *Server) operatorRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /v1/operator/payers/{id}/codes", s.operator(s.opPayerCodes))
 	mux.Handle("PUT /v1/operator/payers/{id}/codes", s.operator(s.opPutCodes))
 	mux.Handle("POST /v1/operator/payers/{id}/codes/accept", s.operator(s.opAcceptSuggestions))
+	mux.Handle("POST /v1/operator/payers/{id}/codes/model", s.operator(s.opModelCodes))
 	mux.Handle("PUT /v1/operator/payers/{id}/list", s.operator(s.opPutList))
+	mux.Handle("PUT /v1/operator/payers/{id}/rules", s.operator(s.opPutRules))
+	mux.Handle("GET /v1/operator/payers/{id}/list", s.operator(s.opGetList))
 	mux.Handle("GET /v1/operator/payers/{id}/changes", s.operator(s.opChanges))
 }
 
@@ -47,6 +54,7 @@ type opPayerView struct {
 	Inactive      bool              `json:"inactive"`
 	MissingFields []string          `json:"missing_fields"`
 	ListSize      int               `json:"list_size"`
+	ListRules     int               `json:"list_rules"` // codes in the list with a rule beyond price
 	TotalItems    int               `json:"total_items"`
 }
 
@@ -55,6 +63,11 @@ func viewOpPayer(p catalog.Payer) opPayerView {
 		ListSize: len(catalog.PayerList(p.ID)), TotalItems: len(catalog.Items(""))}
 	if v.Fields == nil {
 		v.Fields = map[string]string{}
+	}
+	for _, e := range catalog.PayerList(p.ID) {
+		if e.Limited() {
+			v.ListRules++
+		}
 	}
 	if m, _, ok := connector.Lookup(p.Connector); ok {
 		for _, f := range m.PayerFields {
@@ -151,6 +164,8 @@ type itemCode struct {
 	InList      *bool                    `json:"in_list,omitempty"` // nil when the payer has no list loaded
 	Generated   bool                     `json:"generated,omitempty"`
 	Suggestions []catalog.CodeSuggestion `json:"suggestions"`
+	// ModelPick is a model's proposal for an item without a code.
+	ModelPick *store.CodePick `json:"model_pick,omitempty"`
 }
 
 // opPayerCodes is every standard item with the payer's code for it, and for
@@ -161,6 +176,11 @@ func (s *Server) opPayerCodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hasList := len(catalog.PayerList(p.ID)) > 0
+	picks, err := s.Store.CodePicks(r.Context(), p.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	out := []itemCode{}
 	coded := map[catalog.ItemKind][2]int{}
 	for _, it := range catalog.Items(catalog.ItemKind(r.URL.Query().Get("kind"))) {
@@ -177,6 +197,9 @@ func (s *Server) opPayerCodes(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if hasList {
 			row.Suggestions = catalog.SuggestPayerCodes(p.ID, it.ID, 3)
+			if mp, ok := picks[it.ID]; ok {
+				row.ModelPick = &mp
+			}
 		}
 		coded[it.Kind] = c
 		out = append(out, row)
@@ -257,8 +280,13 @@ func (s *Server) opAcceptSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		MinConfidence float64 `json:"min_confidence"`
+		Source        string  `json:"source"` // words (the default) or model
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	if in.Source != "" && in.Source != "words" && in.Source != "model" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_source", "Use words or model.", nil)
 		return
 	}
 	if in.MinConfidence == 0 {
@@ -269,8 +297,27 @@ func (s *Server) opAcceptSuggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var changes []store.CodeChange
+	var picks map[string]store.CodePick
+	if in.Source == "model" {
+		var err error
+		if picks, err = s.Store.CodePicks(r.Context(), p.ID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
 	for _, it := range catalog.Items("") {
 		if _, ok := catalog.CodeFor(p.ID, it.ID); ok {
+			continue
+		}
+		if in.Source == "model" {
+			// The model's pick, still in the payer's list.
+			mp, ok := picks[it.ID]
+			if !ok || mp.Code == "" || mp.Confidence < in.MinConfidence {
+				continue
+			}
+			if e, ok := catalog.ListEntryFor(p.ID, mp.Code); ok {
+				changes = append(changes, store.CodeChange{ItemID: it.ID, Code: e.Code, Description: e.Name})
+			}
 			continue
 		}
 		sg := catalog.SuggestPayerCodes(p.ID, it.ID, 2)
@@ -287,7 +334,9 @@ func (s *Server) opAcceptSuggestions(w http.ResponseWriter, r *http.Request) {
 }
 
 // opPutList loads the payer's own code list from CSV with a header row:
-// code and name are required; group and price (in major units) optional.
+// code and name are required; group, price (in major units) and the payer's
+// rules for each code (max quantity, sex, min age, max age, authorisation)
+// optional.
 func (s *Server) opPutList(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.opPayer(w, r)
 	if !ok {
@@ -312,6 +361,100 @@ func (s *Server) opPutList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": len(entries), "skipped": skipped})
+}
+
+// opGetList returns the payer's own list, at most 500 codes; ?limited=true
+// keeps the codes that carry a rule beyond their price.
+func (s *Server) opGetList(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.opPayer(w, r)
+	if !ok {
+		return
+	}
+	limited := r.URL.Query().Get("limited") == "true"
+	all := catalog.PayerList(p.ID)
+	out := []catalog.ListEntry{}
+	n := 0
+	for _, e := range all {
+		if limited && !e.Limited() {
+			continue
+		}
+		n++
+		if len(out) < 500 {
+			out = append(out, e)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "total": n})
+}
+
+// opPutRules sets whether a price above the payer's tariff, or a code outside
+// its list, stops a claim (block) or only warns (warn).
+func (s *Server) opPutRules(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.opPayer(w, r)
+	if !ok {
+		return
+	}
+	var in catalog.PayerRules
+	if !decode(w, r, &in) {
+		return
+	}
+	for _, v := range []string{in.PricePolicy, in.UnlistedPolicy} {
+		if v != "warn" && v != "block" {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_rules", "price_policy and unlisted_policy are warn or block.", nil)
+			return
+		}
+	}
+	if err := s.Store.SavePayerRules(r.Context(), p.ID, in, orgFrom(r.Context()).UserID); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	np, _ := catalog.LookupPayer(p.ID)
+	writeJSON(w, http.StatusOK, viewOpPayer(np))
+}
+
+// listRules reads a list row's rules into e, or says why the row cannot be
+// used. Blank cells set nothing.
+func listRules(e *catalog.ListEntry, qty, sex, minAge, maxAge, auth string) string {
+	if qty != "" {
+		n, err := strconv.ParseInt(qty, 10, 64)
+		if err != nil || n < 1 {
+			return "max quantity " + qty + " is not a whole number of 1 or more"
+		}
+		e.MaxQuantity = &n
+	}
+	switch strings.ToLower(sex) {
+	case "", "any", "all", "both":
+	case "f", "female", "women", "woman":
+		e.Sex = "female"
+	case "m", "male", "men", "man":
+		e.Sex = "male"
+	default:
+		return "sex " + sex + " is not female, male or blank"
+	}
+	for _, a := range []struct {
+		raw string
+		to  **int
+		at  string
+	}{{minAge, &e.MinAge, "min age"}, {maxAge, &e.MaxAge, "max age"}} {
+		if a.raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(a.raw)
+		if err != nil || n < 0 || n > 150 {
+			return a.at + " " + a.raw + " is not an age in years"
+		}
+		*a.to = &n
+	}
+	if e.MinAge != nil && e.MaxAge != nil && *e.MinAge > *e.MaxAge {
+		return "min age is above max age"
+	}
+	switch strings.ToLower(auth) {
+	case "", "no", "n", "false", "0":
+	case "yes", "y", "true", "1", "required":
+		e.NeedsAuthorization = true
+	default:
+		return "authorisation " + auth + " is not yes or no"
+	}
+	return ""
 }
 
 type skippedRow struct {
@@ -344,6 +487,11 @@ func parseList(text string) ([]catalog.ListEntry, []skippedRow, error) {
 	}
 	ci, ni := pick("code", "item code", "product id", "tariff code"), pick("name", "description", "item", "product name")
 	gi, pi := pick("group", "category", "type"), pick("price", "tariff", "unit price", "amount")
+	qi := pick("max quantity", "max_quantity", "max qty", "quantity limit", "limit")
+	si := pick("sex", "gender")
+	loi, hii := pick("min age", "min_age", "minimum age"), pick("max age", "max_age", "maximum age")
+	ai := pick("needs authorization", "needs_authorization", "needs authorisation", "authorization", "authorisation",
+		"prior authorization", "prior authorisation")
 	if ci < 0 || ni < 0 {
 		return nil, nil, errors.New("the first row must name the columns, with at least code and name")
 	}
@@ -387,6 +535,10 @@ func parseList(text string) ([]catalog.ListEntry, []skippedRow, error) {
 			minor := int64(f*100 + 0.5)
 			e.Price = &minor
 		}
+		if why := listRules(&e, get(qi), get(si), get(loi), get(hii), get(ai)); why != "" {
+			skipped = append(skipped, skippedRow{line, why})
+			continue
+		}
 		seen[e.Code] = true
 		entries = append(entries, e)
 	}
@@ -407,4 +559,87 @@ func (s *Server) opChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// opModelCodes asks the code-matching model for the payer's code of each
+// standard item that has none (or of the items named), from the payer's own
+// list, and keeps the picks for an operator to accept.
+func (s *Server) opModelCodes(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.opPayer(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		ItemIDs []string         `json:"item_ids"`
+		Kind    catalog.ItemKind `json:"kind"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if !catalog.HasList(p.ID) {
+		writeError(w, http.StatusConflict, "no_list", "Load "+p.Name+"'s code list first; the model picks only from it.", nil)
+		return
+	}
+	asked := in.ItemIDs
+	if len(asked) == 0 {
+		for _, it := range catalog.Items(in.Kind) {
+			if _, ok := catalog.CodeFor(p.ID, it.ID); !ok {
+				asked = append(asked, it.ID)
+			}
+		}
+	}
+	if len(asked) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"asked": 0, "found": 0, "data": []store.CodePick{}})
+		return
+	}
+	if len(asked) > 1000 {
+		writeError(w, http.StatusUnprocessableEntity, "too_many_items", "Ask about at most 1,000 items at a time.", nil)
+		return
+	}
+	rt, err := s.Store.AIRouter(r.Context(), s.Vault, ai.TaskCodeMatching)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(rt.Providers) == 0 {
+		writeError(w, http.StatusConflict, "no_model", "No model is set up for code matching. Add one under AI models.", nil)
+		return
+	}
+	extendWrite(w, 5*time.Minute+10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	org := orgFrom(r.Context())
+	got, runs := assist.MatchPayerCodes(ctx, rt, p.ID, asked)
+	s.recordRuns(ctx, org.ID, runs)
+	if len(got) == 0 {
+		for _, run := range runs {
+			if run.Err != nil {
+				s.Logger.WarnContext(r.Context(), "model payer codes", "payer", p.ID, "err", run.Err)
+				writeError(w, http.StatusBadGateway, "model_failed", "The model could not answer. Try again, or use the word matches.", nil)
+				return
+			}
+		}
+	}
+	picks := make([]store.CodePick, 0, len(got))
+	answered := make([]string, 0, len(got))
+	found := 0
+	for _, id := range asked {
+		g, ok := got[id]
+		if !ok {
+			continue
+		}
+		answered = append(answered, id)
+		cp := store.CodePick{ItemID: id, Confidence: g.Confidence, Reason: g.Reason, Model: g.Evidence.ModelVersion, PromptVersion: g.Evidence.PromptVersion}
+		if g.Found {
+			cp.Code, cp.Name = g.Entry.Code, g.Entry.Name
+			found++
+		}
+		picks = append(picks, cp)
+	}
+	// Only the items the model answered lose their old pick.
+	if err := s.Store.SaveCodePicks(r.Context(), p.ID, answered, picks, org.UserID); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"asked": len(asked), "answered": len(answered), "found": found, "data": picks})
 }

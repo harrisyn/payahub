@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -19,10 +19,12 @@ import (
 	"github.com/harrisyn/payahub/internal/claim"
 	_ "github.com/harrisyn/payahub/internal/connector/all"
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/payment"
 	"github.com/harrisyn/payahub/internal/queue"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
+	"github.com/harrisyn/payahub/internal/webhook"
 )
 
 // These tests need Postgres: set PAYAHUB_TEST_DATABASE_URL (CI does).
@@ -36,6 +38,7 @@ var (
 	shared    *httptest.Server
 	st        *store.Store
 	setupErr  error
+	testQueue *queue.Client
 )
 
 func setup(t testing.TB) env {
@@ -46,6 +49,9 @@ func setup(t testing.TB) env {
 	}
 	setupOnce.Do(func() {
 		ctx := context.Background()
+		// Claims are followed after acknowledgement only when a test asks,
+		// so states stay put while other tests look at them.
+		store.StatusFirstCheck["sandbox"] = time.Hour
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		if st, setupErr = store.Open(ctx, url); setupErr != nil {
 			return
@@ -64,15 +70,17 @@ func setup(t testing.TB) env {
 		if setupErr = err; err != nil {
 			return
 		}
-		rc, err := queue.NewClient(st, v, 200, logger)
+		rc, err := queue.NewClient(st, v, 200, logger, testMail)
 		if setupErr = err; err != nil {
 			return
 		}
+		testQueue = rc
 		if setupErr = rc.Start(ctx); setupErr != nil {
 			return
 		}
 		payment.Register(&payment.Sandbox{Amount: st.SandboxAmount})
-		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger}).Handler())
+		shared = httptest.NewServer((&api.Server{Store: st, Queue: rc, Vault: v, Logger: logger, OCR: formOCR{}, AllowPrivateWebhooks: true}).Handler())
+		go (&webhook.Dispatcher{Store: st, Vault: v, HTTP: webhook.Client(true), Logger: logger, Every: 50 * time.Millisecond}).Run(ctx)
 	})
 	if setupErr != nil {
 		t.Fatal(setupErr)
@@ -283,46 +291,33 @@ func TestLostReplyReconcilesWithoutDuplicate(t *testing.T) {
 	}
 }
 
-// TestThroughput pushes PAYAHUB_LOAD claims through create, submit and
-// delivery to the sandbox payer, and reports the rate. Skipped by default.
-func TestThroughput(t *testing.T) {
-	n, _ := strconv.Atoi(os.Getenv("PAYAHUB_LOAD"))
-	if n == 0 {
-		t.Skip("set PAYAHUB_LOAD to run")
-	}
-	e := setup(t)
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 200
+// testMail keeps every email the workers send.
+var testMail = &mailbox{}
 
-	ids := make([]string, n)
-	start := time.Now()
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 100)
-	for i := range n {
-		sem <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-sem }()
-			ids[i] = e.create(t, "M-"+strconv.Itoa(i))
-			if s, out := e.do(t, "POST", "/v1/claims/"+ids[i]+"/submit", nil); s != 202 {
-				t.Errorf("submit %d %v", s, out)
-			}
-		})
-	}
-	wg.Wait()
-	accepted := time.Since(start)
+type mailbox struct {
+	mu   sync.Mutex
+	sent []mail.Message
+}
 
-	ctx := context.Background()
-	for {
-		var pending int
-		_ = st.Pool.QueryRow(ctx, `SELECT count(*) FROM claims WHERE id = ANY($1) AND state <> 'acknowledged'`, ids).Scan(&pending)
-		if pending == 0 {
-			break
-		}
-		if time.Since(start) > 5*time.Minute {
-			t.Fatalf("%d claims still pending", pending)
-		}
-		time.Sleep(100 * time.Millisecond)
+func (m *mailbox) Send(_ context.Context, msg mail.Message) error {
+	if err := mail.Check(msg); err != nil {
+		return err
 	}
-	done := time.Since(start)
-	t.Logf("%d claims: accepted (create+submit) in %v = %.0f/s; all acknowledged in %v = %.0f/s",
-		n, accepted.Round(time.Millisecond), float64(n)/accepted.Seconds(), done.Round(time.Millisecond), float64(n)/done.Seconds())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+// to returns the messages sent to addr so far.
+func (m *mailbox) to(addr string) []mail.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []mail.Message
+	for _, msg := range m.sent {
+		if slices.Contains(msg.To, addr) {
+			out = append(out, msg)
+		}
+	}
+	return out
 }

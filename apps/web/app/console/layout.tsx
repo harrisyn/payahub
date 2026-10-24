@@ -7,6 +7,7 @@ import { site } from "@/app/site";
 import { ConsoleNav } from "@/components/console-nav";
 import { UIProvider } from "@/components/ui";
 import { daysLeft, planName } from "@/lib/format";
+import { roleName } from "@/lib/roles";
 import { requireOrg } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Console", robots: { index: false, follow: false } };
@@ -42,7 +43,10 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
           )}
         </p>
         <form action={signOut} className="app-top__account">
-          <span className="app-top__user">{org.user.name}</span>
+          <span className="app-top__user">
+            {org.user.name}
+            {org.user.role && <span className="app-muted"> · {roleName[org.user.role]}</span>}
+          </span>
           <button type="submit" className="app-button app-button--quiet">
             Sign out
           </button>
