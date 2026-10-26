@@ -12,8 +12,10 @@ send paths are ported from Serenity in phases 0 and 1.
 ## Run it
 
 ```bash
-docker compose up            # Postgres + API + worker on :8080
+docker compose up --build    # web :3000, API :8080 (sandbox key), Mailpit :8025, Postgres :5432
 ```
+
+Production runs on Dokploy from `docker-compose.prod.yml`: see [docs/deploy.md](docs/deploy.md).
 
 or, with your own Postgres:
 
@@ -70,9 +72,15 @@ token, never an API key.
 | `PAYAHUB_API_URL` | (web) Where the web server finds the API |
 | `NEXT_PUBLIC_SITE_URL` | (web) Canonical site URL for metadata and the sitemap |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | (web) The address the landing page shows |
+| `NEXT_PUBLIC_API_URL` | (web) The public API address shown to developers in the console |
+| `PAYAHUB_APP_URL` | (web) The console's own address, e.g. `https://app.payahub.com`. Set, sign-in and `/console` (operators' super admin at `/console/operator`) move to it from the main domain. Unset, one host serves everything |
+| `PAYAHUB_INSECURE_COOKIES` | (web) `1` drops the Secure flag from session cookies, for the local Docker stack on plain http only |
+
+`NEXT_PUBLIC_` values are written into the web build, so the image takes them as build arguments.
 
 In production run `payahub migrate` once per deploy, then any number of
-`payahub api` and `payahub worker` processes.
+`payahub api` and `payahub worker` processes (`docker-compose.prod.yml` does this).
+`payahub healthcheck` exits 0 when the API in the same container answers `/v1/health`.
 
 ## Payers, platforms and standard items
 

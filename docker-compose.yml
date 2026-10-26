@@ -1,4 +1,14 @@
-# Local development: Postgres plus the API and a worker in one process.
+# Local development: the whole product on one machine.
+#
+#   docker compose up --build
+#
+#   http://localhost:3000   web app (landing page, sign-up, console)
+#   http://localhost:8080   API (sandbox key sk_sandbox_dev)
+#   http://localhost:8025   Mailpit: every email Payahub sends (invitations, enquiries)
+#   localhost:5432          Postgres (postgres / payahub)
+#
+# `payahub dev` migrates, seeds the sandbox organisation and runs the API and a
+# worker in one process. Production runs them apart: see docker-compose.prod.yml.
 services:
   postgres:
     image: postgres:16
@@ -6,17 +16,52 @@ services:
       POSTGRES_PASSWORD: payahub
       POSTGRES_DB: payahub
     ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "payahub"]
       interval: 2s
+      timeout: 3s
+      retries: 30
+
   payahub:
     build: .
     command: ["dev"]
     environment:
-      DATABASE_URL: postgres://postgres:payahub@postgres:5432/payahub
+      DATABASE_URL: postgres://postgres:payahub@postgres:5432/payahub?sslmode=disable
       # Local development only, so saved insurer credentials survive a restart.
       # Production sets its own: openssl rand -base64 32
       PAYAHUB_VAULT_KEY: cGF5YWh1Yi1sb2NhbC1kZXYtb25seS12YXVsdC1rZXk=
+      PAYAHUB_CONSOLE_URL: http://localhost:3000
+      PAYAHUB_SMTP_URL: smtp://mailpit:1025
+      PAYAHUB_MAIL_FROM: no-reply@payahub.local
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/payahub", "healthcheck"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 40s
+
+  web:
+    build:
+      context: apps/web
+      args:
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+    environment:
+      PAYAHUB_API_URL: http://payahub:8080
+      # Plain http on localhost: session cookies without the Secure flag.
+      PAYAHUB_INSECURE_COOKIES: "1"
+    ports: ["3000:3000"]
+    depends_on:
+      payahub: { condition: service_healthy }
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports: ["8025:8025"]
+
+volumes:
+  pgdata:
