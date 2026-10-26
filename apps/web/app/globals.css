@@ -284,6 +284,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .app-tag { margin-left: 8px; font-size: 12px; color: var(--a-muted); background: #EFECF5; padding: 1px 6px; border-radius: 4px; font-weight: 500; }
 .show-sm { display: none; }
 .app-id { white-space: nowrap; }
+dd.app-id { white-space: normal; overflow-wrap: anywhere; }
 .app-id, .app td.num { font-family: var(--font-mono), ui-monospace, Menlo, monospace; font-size: 13px; }
 .app-figures dd.num, .app-strip dd.num, .app-top .num { font-family: var(--font); font-size: inherit; font-variant-numeric: tabular-nums; }
 a.app-id { color: var(--text); }
@@ -409,9 +410,7 @@ a.app-id { color: var(--text); }
 .app-meter > span { display: block; height: 100%; background: var(--positive); }
 .app-meter--part > span { background: var(--hue); }
 .app-codecell { width: 180px; }
-.app-codeinput { width: 100%; min-height: 34px; padding: 4px 8px; border: 1px solid var(--edge); border-radius: 6px; font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; background: #fff; color: inherit; }
-.app-codeinput:focus-visible { outline: 2px solid var(--hue); outline-offset: 0; border-color: var(--hue); }
-.app-codeinput[aria-invalid="true"] { border-color: #a3141b; }
+.app-codeinput input { font-variant-numeric: tabular-nums; }
 .app-row--dirty td { background: #F7F6FE; }
 .app-sugs { display: flex; flex-wrap: wrap; gap: 6px; }
 .app-sug { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 8px; border: 1px dashed var(--control); border-radius: 6px; background: none; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; text-align: left; }
@@ -444,7 +443,7 @@ a.app-id { color: var(--text); }
   .app-stmt td:nth-child(1) { grid-column: 1 / -1; font-size: 13px; }
   .app-stmt td:nth-child(4) { display: none; }
   .app-decide { justify-items: start; }
-  .app-table { display: block; overflow-x: auto; }
+  .app-table { display: block; overflow-x: auto; position: relative; }
   .app-trail__item { grid-template-columns: 1fr; gap: 2px; }
   .hide-sm { display: none; }
   .show-sm { display: block; }
@@ -490,3 +489,119 @@ a.app-id { color: var(--text); }
   .app-providers li { flex-direction: column; align-items: stretch; }
   .app-provider__side { justify-items: start; grid-auto-flow: column; justify-content: space-between; align-items: center; }
 }
+
+/* Reading a claim form */
+.app-read { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+.app-read__doc { position: sticky; top: 16px; }
+.app-read__view { display: block; width: 100%; height: auto; max-height: 78vh; object-fit: contain; object-position: top; margin-top: 16px;
+  border: 1px solid var(--rule); border-radius: 8px; background: #F6F4FA; }
+.app-read__row { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--rule); }
+.app-read__row:first-of-type { border-top: 0; }
+.app-read__row > * { min-width: 0; }
+.app-read__row input:not([type=checkbox]):not([type=radio]) { width: 100%; box-sizing: border-box; }
+object.app-read__view { height: min(78vh, 900px); }
+.app-read__row--line { grid-template-columns: 1fr 80px 140px auto; }
+.app-read__opts { display: grid; gap: 6px; padding-top: 30px; font-size: var(--step-small); }
+.app-choice--plain { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.field--check input, .field--check select { border-color: #D97706; box-shadow: 0 0 0 1px #D97706; }
+.field__check { font-size: var(--step-small); color: #6B4A06; margin: 4px 0 0; }
+.field__check .app-pill { font-size: 11px; padding: 1px 6px; }
+@media (max-width: 900px) {
+  .app-read { grid-template-columns: 1fr; }
+  .app-read__doc { position: static; }
+  .app-read__view { height: 60vh; }
+}
+@media (max-width: 640px) {
+  .app-read__row, .app-read__row--line { grid-template-columns: 1fr 1fr; }
+  .app-read__opts, .app-read__item { grid-column: 1 / -1; }
+  .app-read__opts { padding-top: 0; grid-auto-flow: column; justify-content: start; gap: 16px; }
+}
+/* A select in a table cell shrinks with the cell instead of running off the card. */
+.app-table td select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+
+/* Reading a form: the blacked-out copy the model saw, or the person's file. */
+.app-read__views { margin-top: 16px; }
+.app-segment button { font: inherit; padding: 6px 12px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; font-weight: 500; color: var(--a-muted); cursor: pointer; }
+.app-segment button[aria-pressed="true"] { background: var(--sheet); color: var(--text); box-shadow: 0 1px 2px rgba(20, 10, 38, 0.08); }
+.app-segment button:focus-visible { outline: 2px solid var(--hue); outline-offset: 1px; }
+.app-read__privacy { margin: 12px 0 0; font-size: var(--step-small); color: var(--muted); max-width: 60ch; }
+
+/* A claim's checks: what to fix, what to confirm, what to know, then send. */
+.app-checks { margin-bottom: 20px; }
+.app-issues { list-style: none; margin: 8px 0 0; padding: 0; }
+.app-issue { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--rule); }
+.app-issues .app-issue:first-child, .app-review .app-issue:first-of-type { border-top: 0; }
+.app-issue__tag { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #EFECF5; color: var(--text); }
+.app-issue--error .app-issue__tag { background: #ffedea; color: #831c1e; }
+.app-issue--warning .app-issue__tag { background: #fff4d6; color: #5c3d00; }
+label.app-issue { cursor: pointer; }
+label.app-issue input { margin-top: 4px; }
+.app-review { margin-top: 8px; }
+.app-checks__send { margin-top: 16px; flex-wrap: wrap; }
+.app-button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Webhooks */
+.app-grow { flex: 1 1 320px; min-width: 0; }
+.app-grow input { width: 100%; }
+.field--error input, .field--error select { border-color: #b42318; }
+.app-secret { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 16px; }
+.app-secret span { flex: 1 1 100%; }
+.app-secret code { overflow-wrap: anywhere; flex: 1 1 280px; }
+.app-bad { color: #831c1e; }
+.app-wrap { overflow-wrap: anywhere; }
+.app-measure { max-width: 68ch; }
+@media (max-width: 720px) {
+  .app-table--stack, .app-table--stack tbody, .app-table--stack tr, .app-table--stack td { display: block; width: 100%; }
+  .app-table--stack thead { display: none; }
+  .app-table--stack caption { display: block; width: 100%; }
+  .app-table--stack tr { border-top: 1px solid var(--rule); padding: 12px 0; }
+  .app-table--stack td { border-top: 0; padding: 3px 0; }
+  .app-table--stack td.app-right { text-align: left; padding-top: 10px; }
+}
+
+/* Team */
+.app-member-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+.app-member-controls form { flex-wrap: nowrap; }
+.app-table td .app-member-controls select { width: auto; min-width: 130px; min-height: 36px; padding: 0 10px; border: 1px solid #E6E1EF; border-radius: 8px; background: #fff; font: inherit; font-size: 14px; color: inherit; }
+.app-member-controls__msg { flex-basis: 100%; text-align: right; margin: 0; }
+.app-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px 24px; margin: 16px 0 0; }
+.app-roles dt { font-weight: 600; }
+.app-roles dd { margin: 2px 0 0; color: var(--a-muted); }
+@media (max-width: 720px) {
+  .app-member-controls { justify-content: flex-start; }
+  .app-member-controls__msg { text-align: left; }
+}
+.app-inline-form__grow { flex: 1 1 300px; min-width: 0; }
+.app-inline-form__env { width: 170px; }
+.app-member-controls__role { width: 150px; }
+.app-inline-form__show { width: 240px; }
+.app-measure-card { max-width: 760px; }
+.app-form__row--wide { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+
+/* Where a sent claim stands at the insurer */
+.app-insurer { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; justify-content: space-between; }
+.app-insurer__body { flex: 1 1 320px; display: grid; gap: 6px; }
+.app-insurer__body p { margin: 0; }
+.app-insurer__ask { display: grid; gap: 6px; justify-items: end; }
+.app-insurer--query { border-color: #D97706; background: #fffbeb; }
+.app-insurer__question { font-weight: 600; color: #92400e; }
+@media (max-width: 720px) { .app-insurer__ask { justify-items: start; } }
+
+/* Review queue */
+.app-held-list, .app-waiting-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.app-held { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 2fr); gap: 16px; align-items: start; padding: 16px 0; border-top: 1px solid var(--rule); }
+.app-held:first-child { border-top: 0; }
+.app-held__map { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; margin: 0; }
+.app-held__map > .app-button { align-self: end; min-height: 36px; }
+.app-held__map > :not(.app-button):not(.mantine-InputWrapper-root):not(input) { grid-column: 1 / -1; }
+.app-waiting { padding: 16px 0; border-top: 1px solid var(--rule); }
+.app-waiting:first-child { border-top: 0; }
+.app-waiting__head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.app-waiting__foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-top: 4px; }
+@media (max-width: 47.99em) {
+  .app-held { grid-template-columns: 1fr; gap: 8px; }
+}
+.app-caption { caption-side: top; text-align: left; font-weight: 600; padding: 16px 0 4px; }
+.app-sug--model { border-style: solid; border-color: #C9C2F0; }
+.app-sug--model .app-tag { margin-left: 0; }
+.app-coded { padding: 12px 0; border-bottom: 1px solid var(--rule); display: grid; gap: 4px; }

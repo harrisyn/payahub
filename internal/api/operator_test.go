@@ -153,3 +153,73 @@ func TestSeedNeverOverwritesAnOperatorsEdit(t *testing.T) {
 		t.Fatalf("seed overwrote the edit: %+v", p)
 	}
 }
+
+// A payer's list carries its rules; claims to it are checked against them,
+// and the payer's policy decides whether a price above the tariff stops one.
+func TestPayerRulesFromItsList(t *testing.T) {
+	e := setup(t)
+	op := operatorSession(t, e)
+	id := "baobab_" + strings.ReplaceAll(store.NewID("t"), "-", "")[22:34]
+	if s, p := op.do(t, "PUT", "/v1/operator/payers/"+id, map[string]any{
+		"name": "Baobab Health", "country": "GH", "connector": "medserve", "fields": map[string]any{"insurer_code": "baobab", "insurer_id": "7"},
+	}); s != 201 {
+		t.Fatalf("create: %d %v", s, p)
+	}
+	csv := "Code,Name,Price,Max quantity,Sex,Min age,Max age,Authorization\n" +
+		"CONS,Consultation,150.00,,,,,\n" +
+		"FBC,Full blood count,80.00,1,,,,\n" +
+		"ANC,Antenatal care visit,50.00,,F,12,55,\n" +
+		"MRI,MRI brain,900.00,,,,,yes\n" +
+		"BADSEX,Bad,1.00,,X,,,\n" +
+		"BADAGE,Bad,1.00,,,60,40,\n"
+	s, out := op.do(t, "PUT", "/v1/operator/payers/"+id+"/list", map[string]any{"csv": csv})
+	if s != 200 || out["entries"] != 4.0 || len(out["skipped"].([]any)) != 2 {
+		t.Fatalf("list: %d %v", s, out)
+	}
+	if e, _ := catalog.ListEntryFor(id, "ANC"); e.Sex != "female" || *e.MinAge != 12 || *e.MaxAge != 55 {
+		t.Fatalf("rules read: %+v", e)
+	}
+	op.do(t, "PUT", "/v1/operator/payers/"+id+"/codes", map[string]any{"changes": []any{
+		map[string]any{"item_id": "SRV-0001", "code": "CONS"},
+		map[string]any{"item_id": "LAB-0001", "code": "FBC"},
+	}})
+
+	body := claimBody("M-RULES-1")
+	body["payer_id"] = id
+	body["member"] = map[string]any{"member_number": "M-RULES-1", "gender": "male"}
+	std := func(item string, qty, price int) map[string]any {
+		return map[string]any{"description": item, "quantity": qty, "unit_price": price,
+			"code": map[string]any{"system": "payahub", "value": item}}
+	}
+	body["lines"] = []any{std("SRV-0001", 1, 18000), std("LAB-0001", 2, 8000)}
+	check := func() map[string]string {
+		_, v := e.do(t, "POST", "/v1/claims/validate", body)
+		got := map[string]string{}
+		for _, i := range v["issues"].([]any) {
+			m := i.(map[string]any)
+			got[m["code"].(string)] = m["severity"].(string)
+		}
+		return got
+	}
+	if got := check(); got["price_above_tariff"] != "warning" || got["quantity_over_limit"] != "error" {
+		t.Fatalf("issues: %v", got)
+	}
+	if _, pub := e.do(t, "GET", "/v1/payers/"+id, nil); pub["rules"].(map[string]any)["price_policy"] != "warn" ||
+		pub["rules"].(map[string]any)["has_list"] != true {
+		t.Fatalf("public rules: %v", pub["rules"])
+	}
+
+	if s, _ := op.do(t, "PUT", "/v1/operator/payers/"+id+"/rules", map[string]any{"price_policy": "maybe", "unlisted_policy": "warn"}); s != 422 {
+		t.Fatalf("bad policy accepted: %d", s)
+	}
+	s, p := op.do(t, "PUT", "/v1/operator/payers/"+id+"/rules", map[string]any{"price_policy": "block", "unlisted_policy": "warn"})
+	if s != 200 || p["rules"].(map[string]any)["price_policy"] != "block" {
+		t.Fatalf("rules: %d %v", s, p)
+	}
+	if got := check(); got["price_above_tariff"] != "error" {
+		t.Fatalf("block policy: %v", got)
+	}
+	if _, ch := op.do(t, "GET", "/v1/operator/payers/"+id+"/changes", nil); ch["data"].([]any)[0].(map[string]any)["kind"] != "rules_changed" {
+		t.Fatalf("change history: %v", ch["data"])
+	}
+}

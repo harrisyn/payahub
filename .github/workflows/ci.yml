@@ -28,6 +28,8 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
+      # Forms are redacted with Tesseract before a model sees them.
+      - run: sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr poppler-utils
       - run: go test -race -count=1 ./...
       - run: go build ./cmd/payahub
 

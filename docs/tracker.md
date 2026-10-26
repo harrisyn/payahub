@@ -24,14 +24,15 @@ to the right payer in the payer's own codes, correctly, with nothing lost and no
 
 - [x] Standard item list (services, labs, imaging, procedures, medicines with ATC, consumables)
 - [x] A clinic maps its own codes to standard items once; suggestions to confirm
-- [~] Line resolution: clinic code → standard item → payer code, at create and at send
+- [x] Line resolution: clinic code → standard item → payer code, at create, at send and again when a code is mapped
 - [x] Clinic price list: add, remove, import CSV or Excel (merge or replace, dry run, skipped rows listed);
       a claim line with the clinic's code needs no price or name; each code gets a suggested standard item to confirm
 - [x] A larger standard list for Ghana: 262 items (consultations and ward days, 43 labs, 24 imaging,
       20 procedures, 124 medicines with ATC codes, 20 consumables), each found first by its name and every synonym
 - [x] Diagnoses: ICD-10 list (ICD-10-CM plus WHO-only codes in use in Ghana), search, and checks on every claim
 - [ ] Payer diagnosis codes where a payer uses its own; the NHIA medicines list once we have the file
-- [ ] Refresh the ICD-10 list to the latest release (the shipped copy predates 2020; WHO COVID codes are added by hand)
+- [x] ICD-10 list refreshed to the ICD-10-CM 2026 release (1 April 2026): 98,186 codes, 2,564 more than before
+      (COVID-19 and post-COVID codes among them); `go run ./internal/icd10/gen` rebuilds it from the next release
 - [x] Claims carry prescriptions on drug lines and provisional/confirmed status on diagnoses
 
 ## 3. Connectors that really call the platforms
@@ -48,8 +49,8 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] RX Insurance (8: 012/013, expired claims reopened with a new HMS number, no benefit, authorisation)
 - [x] ClaimIQ (7: whole claim plus batch of one, line by line, idempotent retries)
 - [ ] Live check of each against the real platform (blocked: needs test accounts)
-- [ ] Member check and OTP in the console and the API
-- [ ] Claim status from the payer after sending (accepted, queried, paid, rejected with reason)
+- [x] Member check and OTP in the console and the API: `POST /v1/member-checks` waits for the answer; the code is sealed on its way to the worker
+- [x] Claim status from the payer after sending: followed until paid or rejected (2h, 6h, 12h, then daily for 120 days), each change an event and webhook; `POST /v1/claims/{id}/status-check` asks now
 
 ## 4. AI translation and matching
 
@@ -57,21 +58,35 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Model providers: Claude (Messages API, structured output, effort, server-side fallback), OpenAI
       and any OpenAI-compatible endpoint; each task tries its providers in order and fails over on
       outages or refusals; keys sealed in the vault, set and checked by operators in the console
-- [~] Code suggestion: word matching today; the model router is ready to plug in
-- [ ] Model-backed matching (clinic item → standard item, standard → payer code, diagnosis text → ICD-10)
-      with evidence, per-use thresholds, and the model and prompt version logged on every decision
-- [ ] Review queue in the console for low-confidence lines
-- [ ] Regression checks: a changed input must change the output; known pairs must keep their answer
+- [x] Model-backed matching of clinic items to standard items: the model can only pick a catalogue item of
+      the right kind; word matching fills in and takes over when no model answers; each pick carries its
+      reason, model, prompt version and hash
+- [x] Every model call recorded (task, model, prompt version and hash, input hash, tokens, time, outcome);
+      30-day use per task and model on the AI models page
+- [x] Model-backed standard item → payer code (operators: Ask the model on a payer's codes; the model picks only
+      from the payer's own list, a pick of another strength or form is never sure, picks wait to be accepted) and
+      diagnosis text → ICD-10 (`POST /v1/diagnoses/suggest`, Code with the model under Services and medicines, and
+      a form's diagnosis written without a code; only codes in the list, words scrubbed first)
+- [x] Review queue (Claims, To review; `GET /v1/review-queue`): own codes holding unsent claims back, mapped once to
+      recheck every claim waiting on them; model picks under the threshold and possible copies, confirmed with a note
+- [x] Regression checks: 63 clinic names with known answers (15 groups that differ only in strength or form
+      must each get a different item); run on word matching in every test run and on the model from AI models, with history
 - [x] Intake: spreadsheet upload of claims (CSV or Excel, one row per line, checked before saving,
       re-uploads create nothing new, ready claims can be sent straight away; template in the console)
-- [ ] Intake: PDF and photo of a paper claim form, extracted then reviewed
+- [x] Intake: PDF and photo of a paper claim form, read by a model, every value checked (dates, amounts,
+      ICD-10, insurer, standard items from the catalogue), fields below 90% marked with the words they came
+      from; a person checks and saves (console: Claims, Read a claim form; API: POST /v1/claims/extract)
+- [ ] Try the reading on real Ghanaian claim forms with Claude and set the thresholds from the results
 
 ## 5. Checks before sending
 
 - [x] Required fields, unmapped lines, totals
-- [ ] Payer rules as data (allowed items per payer, quantity limits, prices)
-- [ ] Duplicate claim detection
-- [ ] Filing deadline (60 days, LI 1809)
+- [x] Payer rules as data: each code in an insurer's list can carry most per claim, one sex, an age range and
+      authorisation (columns in the list CSV); a price above the tariff or a code outside the list warns or stops, per insurer
+- [x] Duplicate claim detection: the same patient, payer and visit date; an exact copy waits for a person to confirm
+- [x] Filing deadline (60 days, LI 1809, per payer), warning in the last week; a payer can be set to block late claims
+- [x] Confirming issues that await review, recorded with who and why (`POST /v1/claims/{id}/review`)
+- [x] Claim page: the checks (to fix, to confirm, worth knowing), confirm with a note, and send with the insurer's answer shown on the page
 
 ## 6. Platform
 
@@ -81,22 +96,32 @@ each with contract tests against a recorded copy of the platform's API.
 - [x] Brand: Ananse exchange logo and palette (PR #3)
 - [x] Standard form kit (`@/components/ui`, Mantine 9): searchable selects, remote type-ahead through
       `/lookup/[kind]`, prepend/append inputs, money in minor units, rich text, tags, dates; shown at `/ui`
-- [ ] Move every existing console form onto the kit (native selects and inputs today)
+- [x] Every console and sign-in form on the kit: all selects searchable; native fields left only for files, radio cards and checkboxes
 - [x] Landing page redesign: animated claims-flow hero, how-it-works visuals, live sandbox, share image,
       `NEXT_PUBLIC_SITE_INDEXABLE` switch for launch
 - [x] Landing page taste pass, problem story, platform layer and integration-guide sections, SEO structured data
 - [x] Lead capture on the landing page (contact me, platform not listed, do you have this payer, interface specs):
   `POST /v1/leads` (public, idempotent), operator Enquiries page with most-wanted payers, `/openapi.yaml` served from the API
-- [ ] Notify operators of a new enquiry by email once outbound email is set up
-- [ ] Team members and roles
-- [ ] Webhooks to the clinic's system on every state change
+- [x] Outbound email (SMTP, queued in the same transaction as its cause, retried); operators are emailed every new enquiry once
+- [ ] Set PAYAHUB_SMTP_URL and PAYAHUB_MAIL_FROM in production (needs a mail account, e.g. a transactional provider)
+- [x] Team members and roles: owner, admin, claims, finance, developer, viewer; email invitations; every console write checked against the role (a new route is closed until given a permission)
+- [x] Real-time answers: create or submit with `Prefer: wait=N` and get the payer's answer in the same response (202 if it takes longer); the async path stays
+- [x] Remove patient identity before every AI call: a provider refuses any text or file the de-identifier did not produce; forms are blacked out on our server (Tesseract) and the model sees only those pages; what was removed is kept on each AI run
+- [ ] Try the redaction on real Ghanaian forms (handwritten, photographed at an angle) and widen the labels it knows
+- [x] Webhooks to the clinic's system on every state change: written with the event in one transaction, signed (Standard Webhooks), retried for about 2.5 days, delivery log and test sends in the console
 - [x] Wallets: double-entry ledger; organisation and platform wallets; per-claim charges on acknowledgement and
       monthly fees from the wallet; live claims pause when the wallet does not cover one more
 - [x] Payment providers behind one interface: Paystack (card, mobile money, bank payouts) and a sandbox;
       fundings credited only from the provider's verification; withdrawals approved by an operator, then paid
 - [ ] Paystack live keys and webhook URL set in production; first real funding checked end to end
 - [ ] A second payment provider (e.g. Hubtel or Flutterwave) once a customer needs it
-- [ ] Throughput test at scale on the full path
+- [x] Throughput test at scale on the full path (`PAYAHUB_LOAD=20000 go test -run TestThroughput -v ./internal/api/`):
+      20,000 claims of 3 lines in the clinic's own codes, resolved, checked, queued, sent to the sandbox payer and
+      acknowledged, every step a signed webhook, 1 in 10 waiting for the answer. On one 4-core machine running
+      Postgres, the API and the load together: about 480 claims a second (1.7 million an hour), create and submit
+      p50 156 ms and p99 346 ms, the payer's answer p50 626 ms, webhooks within 3 s of the last claim. Fixed on the
+      way: a save notified on every commit, which takes one database-wide lock (now only when someone waits), and
+      webhook results were committed one at a time (now once per batch). The limit now is the disk's commit flush
 
 ## Waiting on the owner
 

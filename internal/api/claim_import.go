@@ -131,15 +131,10 @@ func (s *Server) checkImported(r *http.Request, ic *importedClaim, fileSHA []byt
 	sum := ic.rowsSHA.Sum(nil)
 	c := newClaim(org, in, sum)
 	c.Provenance.Source = claim.SourceBatch
-	m, err := queue.Prepare(ctx, s.Store.Pool, c)
+	v, err := queue.Check(ctx, s.Store.Pool, c)
 	if err != nil {
 		return err
 	}
-	overrides, err := store.PayerOverrides(ctx, s.Store.Pool, org.ID, c.PayerID, org.Environment)
-	if err != nil {
-		return err
-	}
-	v := engine.Validate(c, m, overrides)
 	ic.Issues, ic.State, ic.Lines, ic.Total, ic.Currency = v.Issues, v.State, len(c.Lines), c.Total, c.Currency
 	if dryRun {
 		return nil

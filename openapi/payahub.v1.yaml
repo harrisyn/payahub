@@ -90,6 +90,13 @@ paths:
   /v1/items/suggest:
     post:
       summary: Suggest standard items for the organisation's own items. Nothing is saved.
+      description: |
+        When a model is set up for code matching, it picks first (source "model", with its reason and
+        evidence: model, prompt version and hash); the catalogue's word matching fills the remaining
+        places. A model can only pick an item that is in the catalogue, of the kind given. When no model
+        is set up, or every model fails, the suggestions are word matches only and method says so.
+      parameters:
+        - { name: method, in: query, schema: { type: string, enum: [auto, words], default: auto }, description: "words skips the model" }
       requestBody:
         required: true
         content:
@@ -126,6 +133,11 @@ paths:
                             properties:
                               item: { $ref: "#/components/schemas/Item" }
                               confidence: { type: number, minimum: 0, maximum: 1 }
+                              source: { type: string, enum: [words, model] }
+                              reason: { type: string, description: What the model read the item as }
+                              evidence: { $ref: "#/components/schemas/Evidence" }
+                  method: { type: string, enum: [words, model] }
+                  note: { type: string, description: Set when the model could not answer }
   /v1/item-mappings:
     get:
       summary: The organisation's own codes mapped to standard items
@@ -152,13 +164,71 @@ paths:
                     type: object
                     required: [local_code, item_id]
                     properties: { local_code: { type: string }, local_name: { type: string }, item_id: { type: string } }
+      description: |
+        Unsent claims with a line carrying one of these codes and no standard item are checked
+        again at once (a claim.rechecked event each): they become ready, wait for a person, or
+        keep what else stops them. `rechecked` counts them.
       responses:
         "200":
-          description: Saved; the full list
+          description: Saved; the full list, and what the recheck did
           content:
             application/json:
-              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/ItemMapping" } } } }
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/ItemMapping" } }
+                  rechecked:
+                    type: object
+                    properties:
+                      claims: { type: integer }
+                      ready: { type: integer }
+                      needs_review: { type: integer }
+                      to_fix: { type: integer }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/review-queue:
+    get:
+      summary: What holds unsent claims back and needs a person
+      description: |
+        `codes`: your own codes on unsent claims with no standard item, most claims first, each
+        with word-matched suggestions; map one with PUT /v1/item-mappings and every claim waiting
+        on it is checked again. `claims`: the oldest 25 claims waiting for a person (a model's pick
+        under the threshold, or a possible copy), with what to check; confirm with
+        POST /v1/claims/{id}/review. `counts`: claims waiting for a person and ready to send.
+        An API key sees its own environment.
+      parameters:
+        - { name: environment, in: query, schema: { type: string, enum: [live, sandbox] } }
+      responses:
+        "200":
+          description: The queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  codes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        name: { type: string, description: The newest line's description }
+                        claims: { type: integer }
+                        lines: { type: integer }
+                        amount: { type: integer, description: Minor units }
+                        currency: { type: string }
+                        oldest_claim_at: { type: string, format: date-time }
+                        suggestions: { type: array, items: { type: object } }
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        claim: { $ref: "#/components/schemas/Claim" }
+                        issues: { type: array, items: { type: object } }
+                  counts:
+                    type: object
+                    properties: { needs_review: { type: integer }, ready: { type: integer } }
+        "400": { $ref: "#/components/responses/Error" }
   /v1/item-mappings/{code}:
     delete:
       summary: Remove one mapping
@@ -428,17 +498,95 @@ paths:
                   data: { type: array, items: { $ref: "#/components/schemas/ClaimSummary" } }
                   next_before: { type: string, format: date-time }
     post:
-      summary: Create a claim (validated, not yet sent)
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Create a claim, and optionally send it and wait for the payer
+      description: |
+        Without `submit`, the claim is validated and saved, not sent. With `submit=true` it is
+        also sent in the same call. Add `Prefer: wait=N` (or `?wait=N`, up to 60 seconds) to get
+        the payer's answer in this response: 200 with `outcome` once the payer answers, or 202
+        with a `Location` to poll (or a webhook) if it has not answered within N seconds.
+        A claim that cannot be sent yet is still saved: 201 with `submitted: false` and the error.
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: submit, in: query, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Wait" }
+        - { $ref: "#/components/parameters/Prefer" }
       requestBody:
         required: true
         content:
           application/json: { schema: { $ref: "#/components/schemas/ClaimInput" } }
       responses:
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Claim" } } } }
-        "200": { description: Replay of an earlier request with the same Idempotency-Key }
+        "200":
+          description: Replay of an earlier request with the same Idempotency-Key, or the payer's answer when waiting
+          content: { application/json: { schema: { $ref: "#/components/schemas/Settled" } } }
+        "202": { $ref: "#/components/responses/StillWaiting" }
         "402": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/extract:
+    post:
+      summary: Read a claim form (a PDF or a photo) into a proposed claim. Nothing is saved.
+      description: |
+        A model reads the form; Payahub then checks every value. Dates and amounts must parse, ICD-10
+        codes must be in the list (a missing code is suggested from the diagnosis words and marked for
+        review), the insurer must match one catalogue payer, and each line's standard item comes from
+        the catalogue's own matching, never from the model. Each field reports its confidence, the words
+        it was read from, and needs_review when it is below the threshold for read fields (0.90).
+        Check the marked fields, then create the claim with POST /v1/claims. Every model call is
+        recorded with its model and prompt version; the document is not stored.
+
+        The model never sees who the patient is. The form is read on Payahub's server first, and the
+        patient's name, member, policy and card numbers, date of birth, phone and address are blacked
+        out; the model gets only those blacked-out pages, as images. The hidden details are read on the
+        server and returned marked needs_review. A form on which the patient's name label cannot be
+        found is not sent to the model (422 cannot_deidentify).
+      parameters:
+        - { name: include, in: query, schema: { enum: [redacted_pages] }, description: Also return the pages as the model saw them }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { file: { type: string, format: binary } }, required: [file] }
+          application/pdf: { schema: { type: string, format: binary } }
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        "200":
+          description: The proposed claim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claim: { $ref: "#/components/schemas/ClaimInput" }
+                  fields:
+                    type: object
+                    description: "By path: member.member_number, diagnoses.0.code, lines.2.unit_price"
+                    additionalProperties:
+                      type: object
+                      properties:
+                        confidence: { type: number }
+                        quote: { type: string }
+                        read: { type: string, description: The model's value when it was dropped or replaced }
+                        note: { type: string }
+                        needs_review: { type: boolean }
+                  payer_name: { type: string, description: The insurer as written }
+                  review: { type: integer, description: How many fields need a person }
+                  evidence: { $ref: "#/components/schemas/Evidence" }
+                  privacy:
+                    type: object
+                    description: What was blacked out before the model saw the form (kinds and counts, never values)
+                    properties:
+                      method: { type: string }
+                      removed: { type: object, additionalProperties: { type: integer } }
+                      pages: { type: integer }
+                  redacted_pages: { type: array, items: { type: string, description: A data:image/png URL } }
+        "422": { description: The patient's identity could not be found on the form, so it was not read, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: Form reading is not available on this server, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: No model is set up to read documents, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "413": { $ref: "#/components/responses/Error" }
+        "415": { description: Not a PDF, PNG, JPEG or WebP file, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { description: The model could not read the document, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /v1/claims/import:
     post:
       security: [{ apiKey: [] }, { session: [] }]
@@ -524,10 +672,370 @@ paths:
         Validates the claim and queues it durably in the same transaction, then answers 202.
         The claim moves to `submitted`, then `acknowledged`, `rejected`, or back to `ready`
         if something a person must fix stopped it. Calling it again while queued is a no-op.
+        With `Prefer: wait=N` (or `?wait=N`, up to 60) the call holds until the payer answers
+        and returns 200 with `outcome`; if N seconds pass first it returns 202 as usual.
+      parameters:
+        - { $ref: "#/components/parameters/ClaimID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/Wait" }
+        - { $ref: "#/components/parameters/Prefer" }
+      responses:
+        "200":
+          description: The payer answered within the wait
+          content: { application/json: { schema: { $ref: "#/components/schemas/Settled" } } }
+        "202": { $ref: "#/components/responses/StillWaiting" }
+        "402": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/claims/{id}/checks:
+    get:
+      summary: Run the edit rules on a saved claim without changing it
+      description: |
+        What stands between the claim and its payer: errors to fix, issues awaiting a person's
+        review (an AI value below its threshold, a possible duplicate, a late filing), and warnings.
       parameters: [{ $ref: "#/components/parameters/ClaimID" }]
       responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Validation" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/claims/{id}/status-check:
+    post:
+      summary: Ask the payer now where an acknowledged claim stands
+      description: |
+        After a payer acknowledges a claim, Payahub asks it again on its own (about 2 hours later,
+        then 6 h, 12 h, then daily, for 120 days) until the claim is paid or rejected. Each change is
+        a claim event and a webhook: claim.approved, claim.paid, claim.rejected, and claim.queried
+        when the payer asks a question (in payer_message). This asks now instead, and waits up to
+        20 seconds (or `Prefer: wait=N`) for the answer.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: The claim, with payer_status, payer_message and status_checked_at }
+        "202": { description: The payer has not answered yet }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "not_with_payer: the claim is not acknowledged or approved" }
+  /v1/claims/{id}/review:
+    post:
+      summary: Confirm issues awaiting review
+      description: |
+        Records who confirmed each issue, when, and why. Only review-severity issues can be
+        confirmed; errors are fixed on the claim. A confirmed issue no longer stops the claim.
+      parameters: [{ $ref: "#/components/parameters/ClaimID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [code, field]
+                    properties: { code: { type: string }, field: { type: string } }
+                note: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claim: { $ref: "#/components/schemas/Claim" }
+                  validation: { $ref: "#/components/schemas/Validation" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/member-checks:
+    post:
+      summary: Ask the insurer whether a member is covered, or to text the member a code
+      description: |
+        Waits up to 20 seconds for the insurer's answer by default (or the caller's `Prefer: wait=N`,
+        up to 60) and answers 200 with the check. If the insurer is slower it answers 202 with a
+        `Location` to read later. The insurer call runs on a worker, which alone opens the
+        organisation's insurer credentials. A code the member gives (`otp`) is sealed on its way to
+        the worker and never stored readable. Some insurers answer `otp_required`: send the member a
+        code with `action: send_otp`, then check again with `otp`. In the sandbox, member numbers
+        starting NOTFOUND, INACTIVE or OTP give those answers, and the code is 123456.
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+        - { name: Prefer, in: header, schema: { type: string, example: "wait=20" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payer_id, member_number]
+              properties:
+                payer_id: { type: string, example: sandbox }
+                member_number: { type: string, maxLength: 64 }
+                otp: { type: string, maxLength: 16 }
+                action: { enum: [verify, send_otp], default: verify }
+                environment: { enum: [sandbox, live], description: Session only; a key uses its own }
+      responses:
+        "200": { description: Answered, content: { application/json: { schema: { $ref: "#/components/schemas/MemberCheck" } } } }
+        "202": { description: The insurer has not answered yet, content: { application/json: { schema: { $ref: "#/components/schemas/MemberCheck" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/member-checks/{id}:
+    get:
+      summary: Read a member check, waiting like the POST if it is still pending
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Answered, content: { application/json: { schema: { $ref: "#/components/schemas/MemberCheck" } } } }
+        "202": { description: Still waiting on the insurer }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/members:
+    get:
+      summary: List the organisation's members and open invitations (console session)
+      description: |
+        Every member reads everything in the organisation. Writes from a console session need the
+        member's role to allow them, or the answer is 403 not_permitted: claims (claims, claim forms),
+        setup (profile, insurer settings and accounts, price list, mappings), billing (plan, wallet,
+        payouts, withdrawals), developers (API keys, webhooks) and team (members, invitations).
+        Owners and admins hold all five; only an owner adds, changes or removes an owner. Claims staff
+        hold claims; finance holds billing; developers hold developers and setup; viewers hold none.
+        API keys are not members and act for the whole organisation in their environment.
+      responses:
+        "200":
+          description: Members, invitations and the roles that exist
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Member" } }
+                  invitations: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+                  roles: { type: array, items: { $ref: "#/components/schemas/Role" } }
+  /v1/members/{id}:
+    put:
+      summary: Change a member's role (team)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [role], properties: { role: { $ref: "#/components/schemas/Role" } } }
+      responses:
+        "204": { description: Changed. It takes effect on the member's next request. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "last_owner: the organisation keeps at least one owner" }
+    delete:
+      summary: Remove a member (team); their sessions end at once
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { description: "last_owner" }
+  /v1/invitations:
+    post:
+      summary: Invite someone by email (team)
+      description: |
+        Emails a link that works once, for 7 days. Inviting the same address again replaces the
+        earlier link. Someone removed earlier comes back as the same member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string, maxLength: 120 }
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "201": { description: Sent, content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "already_member, or email_taken by another organisation" }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/invitations/{id}:
+    delete:
+      summary: Withdraw an open invitation (team)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Withdrawn }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/invitations/accept/{token}:
+    parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+    get:
+      summary: Show an invitation from its link (no authentication)
+      security: []
+      responses:
+        "200":
+          description: The invitation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization: { type: string }
+                  email: { type: string }
+                  name: { type: string }
+                  role: { $ref: "#/components/schemas/Role" }
+                  invited_by: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "404": { description: Expired, withdrawn or already used }
+    post:
+      summary: Accept an invitation and sign in (no authentication)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password]
+              properties:
+                name: { type: string }
+                password: { type: string, minLength: 10 }
+      responses:
+        "201":
+          description: Joined and signed in
+          content: { application/json: { schema: { type: object, properties: { session_token: { type: string } } } } }
+        "404": { description: Expired, withdrawn or already used }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/webhook-endpoints:
+    post:
+      summary: Add an endpoint that hears about every claim event
+      description: |
+        Payahub posts each claim event (claim.created, claim.submission_queued, claim.submission_started,
+        claim.attempt_failed, claim.acknowledged, claim.approved, claim.paid, claim.queried,
+        claim.rejected, claim.returned_to_ready,
+        claim.validation_failed, claim.reviewed, claim.rechecked, and ping) to the endpoint as JSON, signed in the
+        Standard Webhooks format: headers webhook-id, webhook-timestamp and webhook-signature
+        (v1, then base64 HMAC-SHA256 of "id.timestamp.body" with the secret's base64 key). Each event is
+        written in the same transaction as the change it reports, so none is lost. Delivery is at least
+        once and not ordered: drop repeats by id and order by created_at. A non-2xx answer is retried
+        with backoff for about two and a half days. The address must be public https. An API key's
+        endpoint hears its own environment; a console session names one (sandbox by default).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, example: "https://hms.example.com/payahub/events" }
+                description: { type: string, maxLength: 200 }
+                environment: { enum: [sandbox, live], description: Session only }
+      responses:
+        "201":
+          description: Made. The secret is shown this once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoint: { $ref: "#/components/schemas/WebhookEndpoint" }
+                  secret: { type: string, example: "whsec_..." }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      summary: List webhook endpoints, with how their deliveries are going
+      parameters:
+        - { name: environment, in: query, schema: { enum: [sandbox, live] }, description: Session only }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/WebhookEndpoint" } } } }
+  /v1/webhook-endpoints/{id}:
+    delete:
+      summary: Remove an endpoint and its undelivered events
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/webhook-endpoints/{id}/ping:
+    post:
+      summary: Send a ping event to check the endpoint
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
         "202": { description: Queued }
-        "402": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/webhook-endpoints/{id}/deliveries:
+    get:
+      summary: The endpoint's last 50 deliveries, newest first
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        event_type: { type: string }
+                        status: { enum: [pending, delivered, failed] }
+                        attempts: { type: integer }
+                        last_status: { type: integer }
+                        last_error: { type: string }
+                        created_at: { type: string, format: date-time }
+                        delivered_at: { type: string, format: date-time }
+                        payload: { $ref: "#/components/schemas/WebhookEvent" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/diagnoses/suggest:
+    post:
+      security: [{ apiKey: [] }, { session: [] }]
+      summary: Propose ICD-10 codes for diagnoses written in words ("URTI", "BP", "malaria")
+      description: |
+        The code-matching model, when one is set up, codes each diagnosis first; the title search fills
+        in and stands in when no model answers (`method` says which). The model may only give a code in
+        the ICD-10 list. The words are scrubbed of anything identifying before a model sees them. Nothing
+        is saved. Model suggestions carry their evidence (model, prompt version and hash).
+      parameters:
+        - { name: method, in: query, schema: { type: string, enum: [words] }, description: "words: skip the model" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [diagnoses]
+              properties:
+                diagnoses:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: object, required: [text], properties: { text: { type: string, maxLength: 300 } } }
+      responses:
+        "200":
+          description: Up to three suggestions per diagnosis, the model's first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  method: { type: string, enum: [model, words] }
+                  note: { type: string }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text: { type: string }
+                        suggestions:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              code: { type: object, properties: { code: { type: string }, title: { type: string }, billable: { type: boolean } } }
+                              confidence: { type: number }
+                              source: { type: string, enum: [model, words] }
+                              reason: { type: string }
+                              evidence: { $ref: "#/components/schemas/Evidence" }
         "422": { $ref: "#/components/responses/Error" }
   /v1/diagnoses:
     get:
@@ -835,6 +1343,13 @@ paths:
       responses:
         "201": { description: Posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
         "200": { description: A repeat; nothing posted, content: { application/json: { schema: { $ref: "#/components/schemas/Wallet" } } } }
+  /v1/operator/ai-usage:
+    get:
+      security: [{ session: [] }]
+      summary: Model calls in the last 30 days per task and model, with failures, tokens and average time (operators only)
+      responses:
+        "200": { description: Usage }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/operator/ai-providers:
     get:
       security: [{ session: [] }]
@@ -901,6 +1416,33 @@ paths:
       responses:
         "200": { description: The provider with check_ok and check_message set, content: { application/json: { schema: { $ref: "#/components/schemas/AIProvider" } } } }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/operator/ai/checks:
+    get:
+      security: [{ session: [] }]
+      summary: The matching checks and their last 20 runs, newest first (operators only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AICheckRun" } }
+                  cases: { type: integer, description: How many known answers the checks hold }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      security: [{ session: [] }]
+      summary: Run the matching checks on word matching and, when a provider serves code_matching, on the model (operators only)
+      description: |
+        Each case is a clinic name with a known answer. Cases in one group differ only in strength or
+        form and must each get a different item. Every run is recorded with its models and prompt
+        version. The model run may take up to three minutes.
+      responses:
+        "200":
+          description: The runs just made, word matching first
+          content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/AICheckRun" } } } } } }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/operator/ledger:
     get:
       security: [{ session: [] }]
@@ -1038,18 +1580,65 @@ paths:
     post:
       security: [{ session: [] }]
       summary: Take the best match from the payer's list for every item without a code, where it is sure enough
-      description: A match is taken when its confidence is at least `min_confidence` (0.9 by default) and 0.1 ahead of the next.
+      description: |
+        With `source: words` (the default) a word match is taken when its confidence is at least
+        `min_confidence` (0.9 by default) and 0.1 ahead of the next. With `source: model` the model's
+        kept pick is taken when its confidence is at least `min_confidence` and its code is still in
+        the payer's list.
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
         content:
           application/json:
-            schema: { type: object, properties: { min_confidence: { type: number, minimum: 0.5, maximum: 1 } } }
+            schema:
+              type: object
+              properties:
+                min_confidence: { type: number, minimum: 0.5, maximum: 1 }
+                source: { type: string, enum: [words, model], default: words }
       responses:
         "200": { $ref: "#/components/responses/CodesApplied" }
+  /v1/operator/payers/{id}/codes/model:
+    post:
+      security: [{ session: [] }]
+      summary: Ask the code-matching model for the payer's code of each standard item, from the payer's own list (operators only)
+      description: |
+        Without `item_ids`, every item with no code (of `kind`, when given) is asked about. The model
+        may only choose a code in the payer's list; for a list of more than 1,500 codes, only among each
+        item's 15 closest entries by word matching. A pick whose list entry names a different strength
+        or form than the item is capped at 0.5. Picks are kept, shown on GET .../codes as `model_pick`,
+        and become the payer's code only when an operator saves or accepts them. May take a few minutes.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                item_ids: { type: array, maxItems: 1000, items: { type: string } }
+                kind: { type: string }
+      responses:
+        "200":
+          description: The picks just made (code empty where the model found none)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asked: { type: integer }
+                  answered: { type: integer }
+                  found: { type: integer }
+                  data: { type: array, items: { $ref: "#/components/schemas/CodePick" } }
+        "409": { description: "no_list (load the payer's list first) or no_model", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { $ref: "#/components/responses/Error" }
   /v1/operator/payers/{id}/list:
     put:
       security: [{ session: [] }]
-      summary: Replace the payer's own code list from CSV (header row with code and name; group and price optional)
+      summary: Replace the payer's own code list from CSV
+      description: |
+        A header row names the columns: code and name are required; group, price (major units) and
+        the payer's rules for each code are optional: max quantity (per claim), sex (F or M), min age
+        and max age (whole years at the visit) and authorization (yes when the payer needs prior
+        authorisation). Claims to the payer are checked against these rules; breaking one stops the
+        claim (quantity_over_limit, line_not_for_sex, line_not_for_age, authorization_required).
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
         required: true
@@ -1066,6 +1655,53 @@ paths:
                 properties:
                   entries: { type: integer }
                   skipped: { type: array, items: { type: object, properties: { line: { type: integer }, reason: { type: string } } } }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      security: [{ session: [] }]
+      summary: The payer's own list, at most 500 codes; limited=true keeps the codes with rules
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limited, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string }
+                        name: { type: string }
+                        group: { type: string }
+                        price: { type: integer, description: Minor units }
+                        max_quantity: { type: integer }
+                        sex: { enum: [female, male] }
+                        min_age: { type: integer }
+                        max_age: { type: integer }
+                        needs_authorization: { type: boolean }
+  /v1/operator/payers/{id}/rules:
+    put:
+      security: [{ session: [] }]
+      summary: Set whether a price above the tariff, or a code outside the payer's list, stops a claim (block) or warns
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [price_policy, unlisted_policy]
+              properties:
+                price_policy: { enum: [warn, block], description: price_above_tariff }
+                unlisted_policy: { enum: [warn, block], description: not_in_payer_list }
+      responses:
+        "200": { description: The payer, with its rules }
         "422": { $ref: "#/components/responses/Error" }
   /v1/operator/payers/{id}/changes:
     get:
@@ -1174,7 +1810,13 @@ components:
   parameters:
     IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string } }
     ClaimID: { name: id, in: path, required: true, schema: { type: string } }
+    Wait: { name: wait, in: query, schema: { type: integer, minimum: 0, maximum: 60 }, description: Seconds to wait for the payer's answer }
+    Prefer: { name: Prefer, in: header, schema: { type: string, example: "wait=10" }, description: "RFC 7240 wait preference; the same as ?wait" }
   responses:
+    StillWaiting:
+      description: Sent, and the payer has not answered yet. Poll `Location` or wait for the webhook.
+      headers: { Location: { schema: { type: string } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Settled" } } }
     Wallet:
       type: object
       properties:
@@ -1222,6 +1864,34 @@ components:
         bank_name: { type: string }
         account_number: { type: string }
         currency: { type: string }
+    CodePick:
+      type: object
+      properties:
+        item_id: { type: string }
+        code: { type: string, description: Empty when the model found no code in the list }
+        name: { type: string }
+        confidence: { type: number }
+        reason: { type: string }
+        model: { type: string }
+        prompt_version: { type: string }
+        created_at: { type: string, format: date-time }
+    AICheckRun:
+      type: object
+      properties:
+        id: { type: integer }
+        task: { type: string, enum: [code_matching] }
+        method: { type: string, enum: [words, model] }
+        models: { type: string, description: The models that answered, comma separated; empty for word matching }
+        prompt_version: { type: string }
+        total: { type: integer }
+        passed: { type: integer }
+        groups: { type: integer }
+        groups_passed: { type: integer }
+        report:
+          type: object
+          description: The whole run, with each failed case (name, want, got, confidence) and each group not told apart
+        run_by: { type: string }
+        created_at: { type: string, format: date-time }
     AIProvider:
       type: object
       properties:
@@ -1397,9 +2067,102 @@ components:
             state:
               enum: [draft, mapped, validated, needs_review, ready, submitted, acknowledged, approved, rejected, paid, withdrawn]
             payer_claim_number: { type: string }
+            payer_status: { enum: [open, submitted, approved, queried, rejected, paid, unknown], description: What the payer last said after acknowledgement }
+            payer_message: { type: string, description: "The payer's own words, such as its question" }
+            status_checked_at: { type: string, format: date-time }
             total: { type: integer, description: Minor units }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
+    MemberCheck:
+      type: object
+      properties:
+        id: { type: string }
+        environment: { enum: [sandbox, live] }
+        payer_id: { type: string }
+        member_number: { type: string }
+        action: { enum: [verify, send_otp] }
+        status: { enum: [pending, done, failed], description: "failed: the insurer gave an error, in error_code" }
+        result:
+          type: object
+          description: For verify, the insurer's answer; for send_otp, a challenge message.
+          properties:
+            eligible: { type: boolean }
+            member: { type: object }
+            plan_name: { type: string }
+            otp_required: { type: boolean }
+            reason: { type: string, description: "inactive, not_covered_here, expired" }
+            message: { type: string, description: The insurer's own words }
+            cover_ends: { type: string, format: date }
+            challenge: { type: string }
+        error_code: { type: string, example: member_not_found }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    Role:
+      type: string
+      enum: [owner, admin, claims, finance, developer, viewer]
+    Member:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        created_at: { type: string, format: date-time }
+    Invitation:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        invited_by: { type: string, description: The inviter's name }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    WebhookEndpoint:
+      type: object
+      properties:
+        id: { type: string }
+        environment: { enum: [sandbox, live] }
+        url: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        delivered_24h: { type: integer }
+        failing: { type: integer, description: Events still being retried after a failed attempt }
+        last_error: { type: string }
+        last_delivered_at: { type: string, format: date-time }
+    WebhookEvent:
+      type: object
+      properties:
+        id: { type: string, example: evt_1842 }
+        type: { type: string, example: claim.acknowledged }
+        created_at: { type: string, format: date-time }
+        data:
+          type: object
+          properties:
+            claim_id: { type: string }
+            state: { type: string }
+            previous_state: { type: string }
+            payer_claim_number: { type: string }
+            detail: { type: object, description: "The event's detail: an error, the checks, the plan" }
+    Settled:
+      type: object
+      properties:
+        claim: { $ref: "#/components/schemas/Claim" }
+        issues: { type: array, items: { $ref: "#/components/schemas/Issue" } }
+        outcome:
+          nullable: true
+          description: Null while the payer has not answered
+          type: object
+          properties:
+            state: { type: string, description: "acknowledged, rejected, ready (a person must fix something), or another claim state" }
+            final: { type: boolean, description: True when the payer has given its answer }
+            payer_claim_number: { type: string }
+            message: { type: string }
+            error:
+              type: object
+              properties: { code: { type: string }, message: { type: string }, payer_message: { type: string } }
     Validation:
       type: object
       properties:
@@ -1409,15 +2172,14 @@ components:
           properties:
             line_mode: { enum: [realtime, bulk] }
             timing: { enum: [early, deferred] }
-        issues:
-          type: array
-          items:
-            type: object
-            properties:
-              code: { type: string }
-              severity: { enum: [error, warning, review] }
-              field: { type: string }
-              message: { type: string }
+        issues: { type: array, items: { $ref: "#/components/schemas/Issue" } }
+    Issue:
+      type: object
+      properties:
+        code: { type: string }
+        severity: { enum: [error, warning, review] }
+        field: { type: string }
+        message: { type: string }
     Payer:
       type: object
       properties:
@@ -1437,6 +2199,13 @@ components:
         capabilities: { type: array, items: { type: string } }
         coded_items: { type: integer, description: Standard items this payer has a code for }
         notes: { type: string }
+        rules:
+          type: object
+          description: How strictly the payer's own list applies to claims (when has_list)
+          properties:
+            price_policy: { enum: [warn, block] }
+            unlisted_policy: { enum: [warn, block] }
+            has_list: { type: boolean }
     CredentialField:
       type: object
       properties: { name: { type: string }, label: { type: string }, secret: { type: boolean }, required: { type: boolean } }

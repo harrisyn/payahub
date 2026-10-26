@@ -12,7 +12,13 @@ export type ApiResult<T> = { ok: true; status: number; data: T } | { ok: false; 
 
 export async function api<T>(
   path: string,
-  init: { method?: string; body?: unknown; token?: string | null; headers?: Record<string, string> } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    token?: string | null;
+    file?: { data: ArrayBuffer; type: string };
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<ApiResult<T>> {
   const token = init.token === undefined ? (await cookies()).get(SESSION_COOKIE)?.value : init.token;
   let res: Response;
@@ -20,11 +26,12 @@ export async function api<T>(
     res = await fetch(API_URL + path, {
       method: init.method ?? "GET",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": init.file ? init.file.type : "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...init.headers,
       },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      // A file goes as itself, with its own type; anything else as JSON.
+      body: init.file ? init.file.data : init.body === undefined ? undefined : JSON.stringify(init.body),
       cache: "no-store",
     });
   } catch {

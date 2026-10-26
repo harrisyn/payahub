@@ -22,14 +22,18 @@ import (
 	"github.com/harrisyn/payahub/internal/connector"
 	"github.com/harrisyn/payahub/internal/connector/sandbox"
 	"github.com/harrisyn/payahub/internal/engine"
+	"github.com/harrisyn/payahub/internal/mail"
 	"github.com/harrisyn/payahub/internal/store"
 	"github.com/harrisyn/payahub/internal/vault"
 )
 
 const (
 	SubmissionsQueue = "submissions"
-	maxAttempts      = 20
-	payerTimeout     = 60 * time.Second
+	// FollowUpQueue asks payers about claims already sent. It has workers of
+	// its own, so following many claims never holds a new claim back.
+	FollowUpQueue = "follow_ups"
+	maxAttempts   = 20
+	payerTimeout  = 60 * time.Second
 )
 
 type SubmitArgs struct {
@@ -47,20 +51,37 @@ type Client = river.Client[pgx.Tx]
 
 // NewClient builds a River client. With workers > 0 it also works jobs;
 // with 0 it only inserts (the API process).
-func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger) (*Client, error) {
+func NewClient(st *store.Store, v *vault.Vault, workers int, logger *slog.Logger, mailer mail.Sender) (*Client, error) {
+	if mailer == nil {
+		mailer = mail.Log{Logger: logger}
+	}
 	ws := river.NewWorkers()
+	river.AddWorker(ws, &EmailWorker{Sender: mailer})
 	river.AddWorker(ws, &SubmitWorker{Store: st, Vault: v})
+	river.AddWorker(ws, &MemberCheckWorker{Store: st, Vault: v})
+	river.AddWorker(ws, &StatusSweepWorker{Store: st})
+	river.AddWorker(ws, &StatusWorker{Store: st, Vault: v})
 	river.AddWorker(ws, &PayoutWorker{Store: st})
 	river.AddWorker(ws, &BillingWorker{Store: st, Logger: logger})
-	cfg := &river.Config{Workers: ws, Logger: logger}
+	// A caller may be waiting on the payer's answer (submit and wait), so a
+	// new job is picked up within a fraction of a second even when the insert
+	// notification is missed.
+	cfg := &river.Config{Workers: ws, Logger: logger, FetchCooldown: 20 * time.Millisecond, FetchPollInterval: 250 * time.Millisecond}
 	if workers > 0 {
 		cfg.Queues = map[string]river.QueueConfig{
 			SubmissionsQueue: {MaxWorkers: workers},
+			FollowUpQueue:    {MaxWorkers: max(workers/4, 4)},
 			MoneyQueue:       {MaxWorkers: 10},
+			MailQueue:        {MaxWorkers: 5},
 		}
-		cfg.PeriodicJobs = []*river.PeriodicJob{river.NewPeriodicJob(river.PeriodicInterval(billingEvery),
-			func() (river.JobArgs, *river.InsertOpts) { return BillingArgs{}, nil },
-			&river.PeriodicJobOpts{ID: "billing", RunOnStart: true})}
+		cfg.PeriodicJobs = []*river.PeriodicJob{
+			river.NewPeriodicJob(river.PeriodicInterval(billingEvery),
+				func() (river.JobArgs, *river.InsertOpts) { return BillingArgs{}, nil },
+				&river.PeriodicJobOpts{ID: "billing", RunOnStart: true}),
+			river.NewPeriodicJob(river.PeriodicInterval(statusSweepEvery),
+				func() (river.JobArgs, *river.InsertOpts) { return StatusSweepArgs{}, nil },
+				&river.PeriodicJobOpts{ID: "status_sweep", RunOnStart: true}),
+		}
 	}
 	return river.NewClient(riverpgxv5.New(st.Pool), cfg)
 }
@@ -100,11 +121,10 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 			return c, engine.Validation{}, err
 		}
 	}
-	overrides, err := store.PayerOverrides(ctx, tx, c.OrganizationID, c.PayerID, c.Environment)
+	v, err := validate(ctx, tx, c, m)
 	if err != nil {
 		return nil, engine.Validation{}, err
 	}
-	v := engine.Validate(c, m, overrides)
 
 	from := c.State
 	if v.State != claim.Ready {
@@ -138,6 +158,29 @@ func Enqueue(ctx context.Context, st *store.Store, rc *Client, orgID, claimID st
 // the connector that reaches the payer. Sandbox claims are sent to the
 // sandbox payer but checked against the named payer's rules, so trials see
 // realistic validation.
+// Check resolves the claim's lines and runs the edit rules with what the
+// database knows (the payer's settings for the organisation, other claims
+// that may be the same one). It changes nothing.
+func Check(ctx context.Context, q store.Querier, c *claim.Claim) (engine.Validation, error) {
+	m, err := Prepare(ctx, q, c)
+	if err != nil {
+		return engine.Validation{}, err
+	}
+	return validate(ctx, q, c, m)
+}
+
+func validate(ctx context.Context, q store.Querier, c *claim.Claim, m connector.Manifest) (engine.Validation, error) {
+	overrides, err := store.PayerOverrides(ctx, q, c.OrganizationID, c.PayerID, c.Environment)
+	if err != nil {
+		return engine.Validation{}, err
+	}
+	dups, err := store.FindDuplicates(ctx, q, c)
+	if err != nil {
+		return engine.Validation{}, err
+	}
+	return engine.Validate(c, m, overrides, engine.Facts{Today: time.Now(), Duplicates: dups, Tariff: engine.TariffFor(c.PayerID)}), nil
+}
+
 func Prepare(ctx context.Context, q store.Querier, c *claim.Claim) (connector.Manifest, error) {
 	m, ok := manifestFor(c)
 	if !ok {

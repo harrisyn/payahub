@@ -2,8 +2,14 @@
 
 import { useActionState } from "react";
 
-import { addPrice, importPrices, type FormState, type ImportState } from "@/app/actions";
+import {
+  addPrice,
+  importPrices,
+  type FormState,
+  type ImportState,
+} from "@/app/actions";
 import { Field, Messages, Submit } from "@/components/forms";
+import { Select } from "@/components/ui";
 import { kindName } from "@/lib/format";
 import type { ItemKind } from "@/lib/types";
 
@@ -16,9 +22,17 @@ export function ImportPricesForm({ empty }: { empty: boolean }) {
     <form action={action} className="app-form" noValidate>
       <div className="field">
         <label htmlFor="f-file">Price list file</label>
-        <input id="f-file" name="file" type="file" accept=".csv,.xlsx,text/csv" aria-describedby="f-file-h" required />
+        <input
+          id="f-file"
+          name="file"
+          type="file"
+          accept=".csv,.xlsx,text/csv"
+          aria-describedby="f-file-h"
+          required
+        />
         <p className="field__hint" id="f-file-h">
-          CSV or Excel. We look for a code, a name and a price column; a category column helps the matching.
+          CSV or Excel. We look for a code, a name and a price column; a
+          category column helps the matching.
         </p>
       </div>
       {!empty && (
@@ -42,13 +56,15 @@ export function ImportPricesForm({ empty }: { empty: boolean }) {
       </div>
       {c && (
         <p className="app-muted" role="status">
-          {c.added} added, {c.changed} changed, {c.unchanged} unchanged{c.removed ? `, ${c.removed} removed` : ""}.
+          {c.added} added, {c.changed} changed, {c.unchanged} unchanged
+          {c.removed ? `, ${c.removed} removed` : ""}.
         </p>
       )}
       {!!s.skipped?.length && (
         <details className="app-details" open={s.skipped.length <= 5}>
           <summary>
-            {s.skipped.length} {s.skipped.length === 1 ? "row" : "rows"} not imported
+            {s.skipped.length} {s.skipped.length === 1 ? "row" : "rows"} not
+            imported
           </summary>
           <ul className="app-list">
             {s.skipped.slice(0, 100).map((r) => (
@@ -72,18 +88,23 @@ export function AddPriceForm() {
         <Field label="Name" name="name" required />
       </div>
       <div className="app-form__row">
-        <div className="field">
-          <label htmlFor="f-kind">Kind</label>
-          <select id="f-kind" name="kind" defaultValue="">
-            <option value="">Not sure</option>
-            {kinds.map((k) => (
-              <option key={k} value={k}>
-                {kindName[k]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <Field label="Price (GHS)" name="price" inputMode="decimal" placeholder="45.00" required />
+        <Select
+          id="f-kind"
+          name="kind"
+          label="Kind"
+          defaultValue=""
+          data={[
+            { value: "", label: "Not sure" },
+            ...kinds.map((k) => ({ value: k, label: kindName[k] })),
+          ]}
+        />
+        <Field
+          label="Price (GHS)"
+          name="price"
+          inputMode="decimal"
+          placeholder="45.00"
+          required
+        />
       </div>
       <div className="app-form__foot">
         <Submit className="app-button">Add to the list</Submit>

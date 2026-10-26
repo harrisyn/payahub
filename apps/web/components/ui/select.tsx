@@ -15,7 +15,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { FrameProps } from "./inputs";
 
-export type Option = { value: string; label: string; description?: string; disabled?: boolean };
+export type Option = {
+  value: string;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+};
 
 const NOTHING = "Nothing matches";
 
@@ -25,10 +30,16 @@ const shared = {
   nothingFoundMessage: NOTHING,
   maxDropdownHeight: 296,
   comboboxProps: { withinPortal: true, offset: 4 },
-  renderOption: ({ option }: { option: ComboboxItem & { description?: string } }) => (
+  renderOption: ({
+    option,
+  }: {
+    option: ComboboxItem & { description?: string };
+  }) => (
     <span className="ph-option">
       <span>{option.label}</span>
-      {option.description && <span className="ph-option__hint">{option.description}</span>}
+      {option.description && (
+        <span className="ph-option__hint">{option.description}</span>
+      )}
     </span>
   ),
 };
@@ -46,18 +57,40 @@ function Hidden({ name, values }: { name?: string; values: string[] }) {
   );
 }
 
-export type SelectProps = Omit<MSelectProps, "data" | "error" | "searchable"> & FrameProps & { data: Option[] | string[] };
+export type SelectProps = Omit<MSelectProps, "data" | "error" | "searchable"> &
+  FrameProps & { data: Option[] | string[] };
 
 /** One choice from a list held in the page. Always searchable. */
 export function Select({ error, data, ...rest }: SelectProps) {
-  return <MSelect searchable error={error} data={data} {...shared} {...rest} />;
+  // A choice stays chosen: clicking it again does not empty the field.
+  return (
+    <MSelect
+      searchable
+      allowDeselect={false}
+      error={error}
+      data={data}
+      {...shared}
+      {...rest}
+    />
+  );
 }
 
-export type MultiSelectProps = Omit<MMultiSelectProps, "data" | "error" | "searchable" | "name"> &
+export type MultiSelectProps = Omit<
+  MMultiSelectProps,
+  "data" | "error" | "searchable" | "name"
+> &
   FrameProps & { data: Option[] | string[]; name?: string };
 
 /** Several choices from a list held in the page. Always searchable. */
-export function MultiSelect({ error, data, name, value, defaultValue, onChange, ...rest }: MultiSelectProps) {
+export function MultiSelect({
+  error,
+  data,
+  name,
+  value,
+  defaultValue,
+  onChange,
+  ...rest
+}: MultiSelectProps) {
   const [picked, setPicked] = useState<string[]>(value ?? defaultValue ?? []);
   const current = value ?? picked;
   return (
@@ -83,7 +116,12 @@ export function MultiSelect({ error, data, name, value, defaultValue, onChange, 
 // ---------- remote type-ahead ----------
 
 /** Lists the type-ahead can search; each is served by app/lookup/[kind]. */
-export type LookupSource = "items" | "medicines" | "services" | "diagnoses" | "payers";
+export type LookupSource =
+  | "items"
+  | "medicines"
+  | "services"
+  | "diagnoses"
+  | "payers";
 
 // useLookup asks the web server for options matching what was typed. Typing is
 // debounced, a newer query cancels the one in flight, and answers are cached
@@ -108,8 +146,13 @@ function useLookup(source: LookupSource, search: string, minChars: number) {
     const ctl = new AbortController();
     setLoading(true);
     setFailed(false);
-    fetch(`/lookup/${source}?q=${encodeURIComponent(query)}`, { signal: ctl.signal, headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    fetch(`/lookup/${source}?q=${encodeURIComponent(query)}`, {
+      signal: ctl.signal,
+      headers: { Accept: "application/json" },
+    })
+      .then((r) =>
+        r.ok ? r.json() : Promise.reject(new Error(String(r.status))),
+      )
       .then((body: { data: Option[] }) => {
         cache.current.set(query, body.data);
         setOptions(body.data);
@@ -126,17 +169,26 @@ function useLookup(source: LookupSource, search: string, minChars: number) {
   return { options, loading, failed, waiting: search.trim().length < minChars };
 }
 
-function message(loading: boolean, failed: boolean, waiting: boolean, minChars: number) {
+function message(
+  loading: boolean,
+  failed: boolean,
+  waiting: boolean,
+  minChars: number,
+) {
   if (loading) return "Searching…";
   if (failed) return "Search is unavailable. Try again.";
-  if (waiting) return `Type ${minChars === 1 ? "a letter" : `${minChars} letters`} to search`;
+  if (waiting)
+    return `Type ${minChars === 1 ? "a letter" : `${minChars} letters`} to search`;
   return NOTHING;
 }
 
 // Server-side results are already ranked, so the client keeps them as given.
 const keepAll = ({ options }: { options: unknown[] }) => options as never;
 
-export type RemoteSelectProps = Omit<SelectProps, "data" | "onChange" | "value" | "defaultValue"> & {
+export type RemoteSelectProps = Omit<
+  SelectProps,
+  "data" | "onChange" | "value" | "defaultValue"
+> & {
   source: LookupSource;
   /** The current choice with its label, so the field can show it before any search. */
   defaultOption?: Option | null;
@@ -145,13 +197,25 @@ export type RemoteSelectProps = Omit<SelectProps, "data" | "onChange" | "value" 
 };
 
 /** One choice, searched on the server as the person types (type-ahead). */
-export function RemoteSelect({ source, defaultOption = null, onChange, minChars = 1, error, ...rest }: RemoteSelectProps) {
+export function RemoteSelect({
+  source,
+  defaultOption = null,
+  onChange,
+  minChars = 1,
+  error,
+  ...rest
+}: RemoteSelectProps) {
   const [chosen, setChosen] = useState<Option | null>(defaultOption);
   const [search, setSearch] = useState("");
-  const { options, loading, failed, waiting } = useLookup(source, search, minChars);
+  const { options, loading, failed, waiting } = useLookup(
+    source,
+    search,
+    minChars,
+  );
   // The chosen option stays in the list so the field can render its label.
   const data = useMemo(() => {
-    if (!chosen || options.some((o) => o.value === chosen.value)) return options;
+    if (!chosen || options.some((o) => o.value === chosen.value))
+      return options;
     return [chosen, ...options];
   }, [options, chosen]);
 
@@ -163,7 +227,8 @@ export function RemoteSelect({ source, defaultOption = null, onChange, minChars 
       data={data}
       value={chosen?.value ?? null}
       onChange={(v) => {
-        const next = v == null ? null : (data.find((o) => o.value === v) ?? null);
+        const next =
+          v == null ? null : (data.find((o) => o.value === v) ?? null);
         setChosen(next);
         onChange?.(next);
       }}
@@ -178,7 +243,10 @@ export function RemoteSelect({ source, defaultOption = null, onChange, minChars 
   );
 }
 
-export type RemoteMultiSelectProps = Omit<MultiSelectProps, "data" | "onChange" | "value" | "defaultValue"> & {
+export type RemoteMultiSelectProps = Omit<
+  MultiSelectProps,
+  "data" | "onChange" | "value" | "defaultValue"
+> & {
   source: LookupSource;
   defaultOptions?: Option[];
   onChange?: (options: Option[]) => void;
@@ -197,7 +265,11 @@ export function RemoteMultiSelect({
 }: RemoteMultiSelectProps) {
   const [chosen, setChosen] = useState<Option[]>(defaultOptions);
   const [search, setSearch] = useState("");
-  const { options, loading, failed, waiting } = useLookup(source, search, minChars);
+  const { options, loading, failed, waiting } = useLookup(
+    source,
+    search,
+    minChars,
+  );
   const data = useMemo(() => {
     const seen = new Set(options.map((o) => o.value));
     return [...options, ...chosen.filter((o) => !seen.has(o.value))];
@@ -213,7 +285,9 @@ export function RemoteMultiSelect({
         data={data}
         value={chosen.map((o) => o.value)}
         onChange={(values) => {
-          const next = values.map((v) => data.find((o) => o.value === v)).filter((o): o is Option => !!o);
+          const next = values
+            .map((v) => data.find((o) => o.value === v))
+            .filter((o): o is Option => !!o);
           setChosen(next);
           onChange?.(next);
         }}
@@ -232,10 +306,19 @@ export function RemoteMultiSelect({
 
 // ---------- tags ----------
 
-export type TagsInputProps = Omit<MTagsInputProps, "error" | "name"> & FrameProps & { name?: string };
+export type TagsInputProps = Omit<MTagsInputProps, "error" | "name"> &
+  FrameProps & { name?: string };
 
 /** Free-form tags: Enter or a comma adds one; suggestions are optional. */
-export function TagsInput({ error, name, value, defaultValue, onChange, splitChars = [",", ";"], ...rest }: TagsInputProps) {
+export function TagsInput({
+  error,
+  name,
+  value,
+  defaultValue,
+  onChange,
+  splitChars = [",", ";"],
+  ...rest
+}: TagsInputProps) {
   const [tags, setTags] = useState<string[]>(value ?? defaultValue ?? []);
   const current = value ?? tags;
   return (

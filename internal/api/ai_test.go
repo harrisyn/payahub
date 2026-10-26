@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 func TestOperatorConfiguresAIProviders(t *testing.T) {
 	e := setup(t)
+	clearAIProviders(t)
 	ses, _ := signup(t, e)
 	op := operatorSession(t, e)
 
@@ -70,4 +72,17 @@ func TestOperatorConfiguresAIProviders(t *testing.T) {
 	if s, _ := op.do(t, "DELETE", "/v1/operator/ai-providers/local", nil); s != 404 {
 		t.Fatalf("second delete: %d", s)
 	}
+}
+
+// clearAIProviders empties the platform's model providers, which every
+// organisation shares, so a test starts from none and leaves none behind.
+func clearAIProviders(t *testing.T) {
+	t.Helper()
+	clear := func() {
+		if _, err := st.Pool.Exec(context.Background(), `DELETE FROM ai_providers; DELETE FROM ai_runs`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clear()
+	t.Cleanup(clear)
 }

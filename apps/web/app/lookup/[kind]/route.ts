@@ -19,18 +19,28 @@ async function items(q: string, kind?: string): Promise<Option[] | null> {
   if (!res.ok) return null;
   return res.data.data.slice(0, LIMIT).map((it) => ({
     value: it.id,
-    label: [it.name, it.strength, it.form].filter(Boolean).join(" "),
+    // Most names already carry the strength and form ("Amoxicillin 500 mg capsule").
+    label: [it.name, it.strength, it.form]
+      .filter(
+        (p, i) =>
+          p && (i === 0 || !it.name.toLowerCase().includes(p.toLowerCase())),
+      )
+      .join(" "),
     description: `${kindName[it.kind]} · ${it.id}`,
   }));
 }
 
 async function diagnoses(q: string): Promise<Option[] | null> {
-  const res = await api<{ data: Diagnosis[] }>(`/v1/diagnoses?limit=${LIMIT}&q=${encodeURIComponent(q)}`);
+  const res = await api<{ data: Diagnosis[] }>(
+    `/v1/diagnoses?limit=${LIMIT}&q=${encodeURIComponent(q)}`,
+  );
   if (!res.ok) return null;
   return res.data.data.map((d) => ({
     value: d.code,
     label: `${d.code} ${d.title}`,
-    description: d.billable ? undefined : "Category: pick a more specific code to bill",
+    description: d.billable
+      ? undefined
+      : "Category: pick a more specific code to bill",
   }));
 }
 
@@ -47,11 +57,15 @@ async function payers(q: string): Promise<Option[] | null> {
     .map((p) => ({
       value: p.id,
       label: p.name,
-      description: p.kind === "integrated" ? `Through ${p.connector.name}` : "Direct",
+      description:
+        p.kind === "integrated" ? `Through ${p.connector.name}` : "Direct",
     }));
 }
 
-export async function GET(req: NextRequest, ctx: { params: Promise<{ kind: string }> }) {
+export async function GET(
+  req: NextRequest,
+  ctx: { params: Promise<{ kind: string }> },
+) {
   const { kind } = await ctx.params;
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim().slice(0, 120);
   let data: Option[] | null;
@@ -72,10 +86,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ kind: strin
       data = await payers(q);
       break;
     default:
-      return NextResponse.json({ error: { code: "not_found", message: "Unknown list" } }, { status: 404 });
+      return NextResponse.json(
+        { error: { code: "not_found", message: "Unknown list" } },
+        { status: 404 },
+      );
   }
   if (data === null) {
-    return NextResponse.json({ error: { code: "upstream", message: "Search is unavailable" } }, { status: 502 });
+    return NextResponse.json(
+      { error: { code: "upstream", message: "Search is unavailable" } },
+      { status: 502 },
+    );
   }
-  return NextResponse.json({ data }, { headers: { "Cache-Control": "private, max-age=30" } });
+  return NextResponse.json(
+    { data },
+    { headers: { "Cache-Control": "private, max-age=30" } },
+  );
 }

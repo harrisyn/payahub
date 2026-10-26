@@ -201,6 +201,13 @@ type Claim struct {
 	Provenance       Provenance `json:"provenance"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	// Reviews are the issues a person confirmed; set only through the review step.
+	Reviews []Review `json:"reviews,omitempty"`
+	// After acknowledgement: what the payer last said about the claim, and when
+	// Payahub last asked.
+	PayerStatus     string     `json:"payer_status,omitempty"`
+	PayerMessage    string     `json:"payer_message,omitempty"`
+	StatusCheckedAt *time.Time `json:"status_checked_at,omitempty"`
 	Input
 }
 

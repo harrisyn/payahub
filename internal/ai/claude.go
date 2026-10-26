@@ -33,6 +33,9 @@ func newClaude(c Config) *claude {
 }
 
 func (p *claude) Complete(ctx context.Context, r Request) (Response, error) {
+	if err := checkCleared(r); err != nil {
+		return Response{}, err
+	}
 	var blocks []anthropic.BetaContentBlockParamUnion
 	for _, part := range r.Parts {
 		switch {

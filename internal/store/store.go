@@ -25,6 +25,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 
+	"github.com/harrisyn/payahub/internal/access"
 	"github.com/harrisyn/payahub/internal/claim"
 )
 
@@ -40,7 +41,7 @@ var (
 type Store struct {
 	Pool *pgxpool.Pool
 
-	// keys caches API key and session lookups for keyTTL, so a revoked key
+	// keys caches API key lookups for keyTTL, so a revoked key
 	// stops working within that window without a database read per request.
 	keys sync.Map // sha256 string -> cachedKey
 
@@ -48,6 +49,9 @@ type Store struct {
 	// built from; -1 before the first load.
 	catalogVersion atomic.Int64
 	catalogMu      sync.Mutex
+
+	// wait passes claim_saved notifications to requests waiting on a claim.
+	wait waiters
 }
 
 const keyTTL = 30 * time.Second
@@ -80,7 +84,15 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	return st, nil
 }
 
-func (s *Store) Close() { s.Pool.Close() }
+// Close stops the claim listener, if it runs, and closes the pool, which
+// waits for every connection to come back.
+func (s *Store) Close() {
+	s.wait.once.Do(func() {}) // a listener started later would hold the pool open
+	if s.wait.stop != nil {
+		s.wait.stop()
+	}
+	s.Pool.Close()
+}
 
 // Migrate applies our schema (idempotent SQL, in file order) and River's.
 func (s *Store) Migrate(ctx context.Context) error {
@@ -121,6 +133,8 @@ type Org struct {
 	UserID      string
 	// Operator users run Payahub itself: they edit the shared catalogue.
 	Operator bool
+	// Role is a console member's job; empty for an API key.
+	Role access.Role
 }
 
 // Authenticate resolves an API key or a console session token.
@@ -141,7 +155,9 @@ func (s *Store) Authenticate(ctx context.Context, raw string) (Org, error) {
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrUnauthenticated) {
 		return Org{}, ErrUnauthenticated
 	}
-	if err == nil {
+	// Sessions are not cached, so a member's new role or removal takes
+	// effect on their next request.
+	if err == nil && !o.Session {
 		s.keys.Store(string(h), cachedKey{org: o, expires: time.Now().Add(keyTTL)})
 	}
 	return o, err
@@ -279,6 +295,15 @@ func SaveClaim(ctx context.Context, tx pgx.Tx, c *claim.Claim, from claim.State,
 	if err != nil {
 		return err
 	}
+	// Delivered on commit, to requests waiting for this claim to settle.
+	if _, err := tx.Exec(ctx, notifyWaiters, c.ID); err != nil {
+		return err
+	}
+	if from != c.State {
+		if err := scheduleStatusCheck(ctx, tx, c); err != nil {
+			return err
+		}
+	}
 	if c.Environment == "live" && c.State.Billable() && !from.Billable() {
 		if err := chargeClaim(ctx, tx, c); err != nil {
 			return err
@@ -295,9 +320,23 @@ func addEvent(ctx context.Context, q Querier, claimID, kind string, from, to cla
 			return err
 		}
 	}
+	// The event, and a webhook delivery of it to each of the organisation's
+	// endpoints for the claim's environment, in one statement.
 	_, err := q.Exec(ctx, `
-		INSERT INTO claim_events (claim_id, kind, from_state, to_state, detail)
-		VALUES ($1, $2, NULLIF($3, ''), $4, $5)`, claimID, kind, string(from), string(to), raw)
+		WITH ev AS (
+			INSERT INTO claim_events (claim_id, kind, from_state, to_state, detail)
+			VALUES ($1, $2, NULLIF($3, ''), $4, $5)
+			RETURNING id, claim_id, kind, from_state, to_state, detail, created_at)
+		INSERT INTO webhook_deliveries (endpoint_id, event_type, payload)
+		SELECT w.id, 'claim.' || ev.kind, jsonb_build_object(
+			'id', 'evt_' || ev.id, 'type', 'claim.' || ev.kind, 'created_at', ev.created_at,
+			'data', jsonb_strip_nulls(jsonb_build_object(
+				'claim_id', ev.claim_id, 'state', ev.to_state, 'previous_state', ev.from_state,
+				'payer_claim_number', c.payer_claim_number, 'detail', ev.detail)))
+		FROM ev
+		JOIN claims c ON c.id = ev.claim_id
+		JOIN webhook_endpoints w ON w.organization_id = c.organization_id AND w.environment = c.environment AND w.enabled`,
+		claimID, kind, string(from), string(to), raw)
 	return err
 }
 
